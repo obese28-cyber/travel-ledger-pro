@@ -176,6 +176,12 @@ def _run_migrations(app):
         # -- booking_items: airline_id + ticket_number (introduced v1.6) ------
         bi_cols = {c["name"] for c in inspector.get_columns("booking_items")}
         with db.engine.connect() as conn:
+            if "passenger_name" not in bi_cols:
+                conn.execute(text(
+                    "ALTER TABLE booking_items ADD COLUMN passenger_name VARCHAR(200)"
+                ))
+                conn.commit()
+                print("[migration] Added booking_items.passenger_name")
             if "airline_id" not in bi_cols:
                 conn.execute(text(
                     "ALTER TABLE booking_items ADD COLUMN airline_id INTEGER REFERENCES airlines(id)"
@@ -273,6 +279,45 @@ def _run_migrations(app):
             conn.commit()
             print("[migration v2.1] Corrected amount_applied / unapplied_amount for existing payments")
 
+        # -- payments: make invoice_id nullable (introduced v2.2) --
+        # SQLite cannot ALTER COLUMN, so we rebuild the table.
+        pmt_cols_info = inspector.get_columns("payments")
+        invoice_id_col = next((c for c in pmt_cols_info if c["name"] == "invoice_id"), None)
+        if invoice_id_col and not invoice_id_col.get("nullable", True):
+            with db.engine.connect() as conn:
+                conn.execute(text("""
+                    CREATE TABLE payments_v3 (
+                        id                INTEGER PRIMARY KEY AUTOINCREMENT,
+                        payment_reference VARCHAR(50)  NOT NULL UNIQUE,
+                        invoice_id        INTEGER      REFERENCES invoices(id),
+                        customer_id       INTEGER      NOT NULL REFERENCES customers(id),
+                        transaction_type  TEXT         NOT NULL DEFAULT 'invoice_payment',
+                        amount            REAL         NOT NULL,
+                        amount_applied    REAL         NOT NULL DEFAULT 0.0,
+                        unapplied_amount  REAL         NOT NULL DEFAULT 0.0,
+                        payment_date      DATE         NOT NULL,
+                        payment_method    VARCHAR(30)  NOT NULL,
+                        notes             TEXT,
+                        created_by        INTEGER REFERENCES users(id),
+                        created_at        DATETIME
+                    )
+                """))
+                conn.execute(text("""
+                    INSERT INTO payments_v3
+                        (id, payment_reference, invoice_id, customer_id, transaction_type,
+                         amount, amount_applied, unapplied_amount, payment_date,
+                         payment_method, notes, created_by, created_at)
+                    SELECT
+                        id, payment_reference, invoice_id, customer_id, transaction_type,
+                        amount, amount_applied, unapplied_amount, payment_date,
+                        payment_method, notes, created_by, created_at
+                    FROM payments
+                """))
+                conn.execute(text("DROP TABLE payments"))
+                conn.execute(text("ALTER TABLE payments_v3 RENAME TO payments"))
+                conn.commit()
+                print("[migration v2.2] Rebuilt payments table -- invoice_id is now nullable")
+
         # -- chart_of_accounts: seed expense accounts (introduced v1.4) --
         from .models.expense import EXPENSE_CATEGORIES
         with db.engine.connect() as conn:
@@ -327,6 +372,18 @@ def create_app(env: str = "development") -> "Flask":
     from .routes.reports      import reports_bp
     from .routes.airlines     import airlines_bp
     from .routes.admin        import admin_bp
+
+    # ── Load agency profile into config ────────────────────────────────────────
+    try:
+        import sys, os
+        _backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        if _backend_dir not in sys.path:
+            sys.path.insert(0, _backend_dir)
+        from agency_profile import AGENCY_PROFILE
+        app.config["AGENCY_PROFILE"] = AGENCY_PROFILE
+        print(f"[agency] Loaded profile: {AGENCY_PROFILE.get('name')}")
+    except Exception as e:
+        print(f"[agency] Could not load agency_profile.py: {e}")
 
     app.register_blueprint(auth_bp,         url_prefix="/api/auth")
     app.register_blueprint(customers_bp,    url_prefix="/api/customers")

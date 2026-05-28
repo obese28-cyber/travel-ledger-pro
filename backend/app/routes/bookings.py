@@ -60,6 +60,9 @@ def _validate_items(items_data) -> list:
             errs.append(f"Item {n}: selling_price is required.")
         if item.get("vendor_cost") is None:
             errs.append(f"Item {n}: vendor_cost is required.")
+        if item.get("service_type") == "flight":
+            if not (item.get("ticket_number") or "").strip():
+                errs.append(f"Item {n}: ticket number is required for flight bookings.")
     return errs
 
 
@@ -156,7 +159,7 @@ def create_booking():
     if item_errors:
         return error(" | ".join(item_errors))
 
-    # Verify all vendor_ids exist
+    # Verify all vendor_ids exist; check ticket number uniqueness
     for i, item_data in enumerate(items_data):
         vid = item_data.get("vendor_id")
         if vid:
@@ -165,6 +168,17 @@ def create_booking():
                 return error(f"Item {i+1}: Vendor/supplier ID {vid} not found.")
             if not vendor.is_active:
                 return error(f"Item {i+1}: Vendor \"{vendor.name}\" is inactive.")
+
+        tkn = (item_data.get("ticket_number") or "").strip()
+        if tkn:
+            existing = BookingItem.query.filter(
+                db.func.lower(BookingItem.ticket_number) == tkn.lower()
+            ).first()
+            if existing:
+                return error(
+                    f"Ticket number \"{tkn}\" is already used in booking "
+                    f"{existing.booking.booking_reference}. Each ticket number must be unique."
+                )
 
     # ── Create booking header ──────────────────────────────────────────────────
     booking = Booking(
@@ -190,6 +204,9 @@ def create_booking():
             description   = item_data.get("description"),
             selling_price = float(item_data["selling_price"]),
             vendor_cost   = float(item_data["vendor_cost"]),
+            airline_id     = item_data.get("airline_id"),
+            ticket_number  = (item_data.get("ticket_number") or "").strip() or None,
+            passenger_name = (item_data.get("passenger_name") or "").strip() or None,
         )
         db.session.add(item)
 

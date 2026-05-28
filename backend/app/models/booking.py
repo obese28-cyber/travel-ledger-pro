@@ -81,8 +81,9 @@ class BookingItem(db.Model):
                    # flight | hotel | visa | tour_package | insurance | other
     vendor_id     = db.Column(db.Integer, db.ForeignKey("vendors.id"),   nullable=True)
     airline_id    = db.Column(db.Integer, db.ForeignKey("airlines.id"),  nullable=True)
-    ticket_number = db.Column(db.String(100))
-    description   = db.Column(db.Text)
+    ticket_number  = db.Column(db.String(100))
+    passenger_name = db.Column(db.String(200))   # per-item name for multi-pax bookings
+    description    = db.Column(db.Text)
     selling_price = db.Column(db.Float, nullable=False, default=0.0)
     vendor_cost   = db.Column(db.Float, nullable=False, default=0.0)
     created_at    = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
@@ -118,8 +119,9 @@ class BookingItem(db.Model):
             "vendor_name":   self.vendor.name    if self.vendor   else None,
             "airline_id":    self.airline_id,
             "airline_name":  self.airline.name   if self.airline  else None,
-            "ticket_number": self.ticket_number,
-            "description":   self.description,
+            "ticket_number":  self.ticket_number,
+            "passenger_name": self.passenger_name,
+            "description":    self.description,
             "selling_price": self.selling_price,
             "profit_margin": self.profit_margin,
             "created_at":    self.created_at.isoformat() if self.created_at else None,

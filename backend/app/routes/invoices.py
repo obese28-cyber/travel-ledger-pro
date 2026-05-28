@@ -280,6 +280,33 @@ def download_invoice_pdf(invoice_id: int):
         data = invoice.to_dict()
         data["payments"] = [p.to_dict() for p in invoice.payments]
 
+        # Enrich items with booking-level data (routing, dates, traveler name)
+        if invoice.booking:
+            bk = invoice.booking
+            data["traveler_name"]  = bk.traveler_name or bk.customer.name if bk.customer else None
+            data["destination"]    = bk.destination
+            data["travel_date"]    = bk.travel_date.isoformat() if bk.travel_date else None
+            data["return_date"]    = bk.return_date.isoformat()  if bk.return_date  else None
+            # Merge booking item details into invoice items
+            bk_items = {bi.id: bi for bi in bk.items}
+            for inv_item in data.get("items", []):
+                bi_id = inv_item.get("booking_item_id")
+                bi = bk_items.get(bi_id)
+                if bi:
+                    inv_item["routing"]        = bk.destination
+                    inv_item["departure_date"] = bk.travel_date.isoformat() if bk.travel_date else None
+                    inv_item["return_date"]    = bk.return_date.isoformat()  if bk.return_date  else None
+                    # Per-item passenger name (multi-pax) → booking traveler → customer name
+                    inv_item["passenger_name"] = (
+                        bi.passenger_name
+                        or bk.traveler_name
+                        or (bk.customer.name if bk.customer else None)
+                    )
+                    inv_item["airline_name"]   = bi.airline.name if bi.airline else None
+                    inv_item["selling_price"]  = bi.selling_price
+                    inv_item["service_type"]   = bi.service_type
+                    inv_item["ticket_number"]  = bi.ticket_number
+
         agency = current_app.config.get("AGENCY_PROFILE") or {}
 
         from ..services.pdf_service import generate_invoice_pdf

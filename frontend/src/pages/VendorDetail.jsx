@@ -396,32 +396,61 @@ export default function VendorDetail() {
                           )}
                         </td>
 
-                        {/* Credit — payment made */}
+                        {/* Paid column:
+                            - Bill row  → amount already paid against this specific bill
+                            - Pmt row   → the credit amount of this payment */}
                         <td className="px-4 py-3 text-right whitespace-nowrap">
-                          {entry.credit > 0 ? (
+                          {isBill ? (
+                            (entry.amount_paid ?? 0) > 0 ? (
+                              <span className="font-semibold text-emerald-600">{fmt(entry.amount_paid)}</span>
+                            ) : (
+                              <span className="text-slate-200">—</span>
+                            )
+                          ) : entry.credit > 0 ? (
                             <span className="font-semibold text-emerald-600">{fmt(entry.credit)}</span>
                           ) : (
                             <span className="text-slate-200">—</span>
                           )}
                         </td>
 
-                        {/* Running balance */}
+                        {/* Balance Owed column:
+                            - Bill row  → remaining balance on THIS bill (balance_due)
+                            - Pmt row   → cumulative running balance owed to vendor */}
                         <td className="px-4 py-3 text-right whitespace-nowrap">
-                          <span className={`font-bold text-sm ${
-                            bal > 0 ? 'text-red-600'
-                            : bal < 0 ? 'text-emerald-600'
-                            : 'text-slate-400'
-                          }`}>
-                            {fmt(bal)}
-                          </span>
-                          {isBill && entry.due_date && entry.balance_due > 0 && (
-                            <p className="text-xs text-slate-400 mt-0.5">Due {fmtDate(entry.due_date)}</p>
+                          {isBill ? (
+                            <>
+                              <span className={`font-bold text-sm ${
+                                (entry.balance_due ?? 0) > 0 ? 'text-red-600' : 'text-slate-400'
+                              }`}>
+                                {fmt(entry.balance_due ?? 0)}
+                              </span>
+                              {entry.due_date && (entry.balance_due ?? 0) > 0 && (
+                                <p className="text-xs text-slate-400 mt-0.5">Due {fmtDate(entry.due_date)}</p>
+                              )}
+                            </>
+                          ) : (
+                            <span className={`font-bold text-sm ${
+                              bal > 0 ? 'text-red-600'
+                              : bal < 0 ? 'text-emerald-600'
+                              : 'text-slate-400'
+                            }`}>
+                              {fmt(bal)}
+                            </span>
                           )}
                         </td>
 
-                        {/* Action — status only; payments go via Bulk Payment */}
+                        {/* Action — status badge for bills */}
                         <td className="px-4 py-3 text-center whitespace-nowrap">
-                          <span className="text-slate-200 text-xs">—</span>
+                          {isBill ? (
+                            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium
+                              ${entry.status === 'paid'           ? 'bg-emerald-100 text-emerald-700' :
+                                entry.status === 'partially_paid' ? 'bg-amber-100 text-amber-700' :
+                                                                    'bg-red-100 text-red-700'}`}>
+                              {(entry.status || 'unpaid').replace(/_/g, ' ')}
+                            </span>
+                          ) : (
+                            <span className="text-slate-200 text-xs">—</span>
+                          )}
                         </td>
                       </tr>
                     )

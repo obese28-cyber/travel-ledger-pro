@@ -1,24 +1,9 @@
 /**
  * pages/ApplyCreditModal.jsx
  *
- * Apply a SPECIFIC unallocated payment toward an open invoice.
- *
- * Triggered from the payment row in the AR ledger — the one that shows
- * "Unallocated: $10,000".  Staff must choose WHICH invoice to apply it to.
- * The amount is capped at the payment's remaining unapplied_amount so
- * employees cannot pull credit from the air — it must trace back to
- * a real cash source.
- *
- * Props:
- *   customerId    — customer id
- *   customerName  — display name
- *   sourcePayment — the ledger payment row with unapplied_amount > 0
- *                   { payment_id, reference, unapplied_amount, credit,
- *                     payment_method, date, description }
- *   openInvoices  — array of open invoice ledger entries
- *                   [{ invoice_id, reference, invoice_balance, description, date }, ...]
- *   onClose       — dismiss callback
- *   onSuccess     — refresh callback
+ * Apply a SPECIFIC unallocated payment toward one or more open invoices.
+ * Staff can select multiple invoices and enter an amount for each.
+ * Applications are submitted sequentially — one API call per invoice.
  */
 
 import React, { useState, useMemo } from 'react'
@@ -50,76 +35,117 @@ export default function ApplyCreditModal({
 }) {
   const toast = useToast()
 
-  // ── Invoice selection ──────────────────────────────────────────────────────
-  const [selectedInvoiceId, setSelectedInvoiceId] = useState(
-    openInvoices.length === 1 ? String(openInvoices[0].invoice_id) : ''
-  )
+  // selections: { [invoice_id]: { checked: bool, amount: string } }
+  const [selections, setSelections] = useState(() => {
+    const init = {}
+    openInvoices.forEach(inv => {
+      init[inv.invoice_id] = { checked: false, amount: '' }
+    })
+    return init
+  })
 
-  const selectedInvoice = useMemo(
-    () => openInvoices.find(inv => String(inv.invoice_id) === selectedInvoiceId) || null,
-    [openInvoices, selectedInvoiceId]
-  )
+  const [notes,  setNotes]  = useState('')
+  const [saving, setSaving] = useState(false)
+  const [progress, setProgress] = useState(null) // e.g. "Applying 2 of 3…"
 
-  // ── Amount ────────────────────────────────────────────────────────────────
-  const maxApply = selectedInvoice
-    ? Math.min(sourcePayment.unapplied_amount, selectedInvoice.invoice_balance)
-    : 0
+  // Total being applied across all selected invoices
+  const totalApplying = useMemo(() => {
+    return Object.entries(selections).reduce((sum, [, sel]) => {
+      if (!sel.checked) return sum
+      return sum + (parseFloat(sel.amount) || 0)
+    }, 0)
+  }, [selections])
 
-  const [amount,   setAmount]   = useState('')
-  const [notes,    setNotes]    = useState('')
-  const [saving,   setSaving]   = useState(false)
-  const [amtError, setAmtError] = useState('')
+  const remainingUnallocated = Math.max(0, sourcePayment.unapplied_amount - totalApplying)
+  const overLimit = totalApplying > sourcePayment.unapplied_amount + 0.005
 
-  const effectiveAmount = parseFloat(amount) || 0
+  const selectedInvoices = openInvoices.filter(inv => selections[inv.invoice_id]?.checked)
+  const canSubmit = selectedInvoices.length > 0 && totalApplying > 0 && !overLimit && !saving
 
-  const creditAfter  = Math.max(0, sourcePayment.unapplied_amount - effectiveAmount)
-  const invoiceAfter = selectedInvoice
-    ? Math.max(0, selectedInvoice.invoice_balance - effectiveAmount)
-    : 0
-  const fullyPaid    = invoiceAfter <= 0.005
+  function toggleInvoice(invId, invoiceBalance) {
+    setSelections(prev => {
+      const current = prev[invId]
+      const nowChecked = !current.checked
+      // Auto-fill amount when checking: min of invoice balance and remaining unallocated
+      const remaining = sourcePayment.unapplied_amount - Object.entries(prev).reduce((sum, [id, sel]) => {
+        if (String(id) === String(invId) || !sel.checked) return sum
+        return sum + (parseFloat(sel.amount) || 0)
+      }, 0)
+      const autoAmount = nowChecked ? Math.min(invoiceBalance, remaining) : 0
+      return {
+        ...prev,
+        [invId]: {
+          checked: nowChecked,
+          amount: nowChecked ? autoAmount.toFixed(2) : '',
+        }
+      }
+    })
+  }
 
-  function handleInvoiceChange(invId) {
-    setSelectedInvoiceId(invId)
-    setAmount('')
-    setAmtError('')
+  function setAmount(invId, value) {
+    setSelections(prev => ({
+      ...prev,
+      [invId]: { ...prev[invId], amount: value }
+    }))
   }
 
   async function handleSubmit(e) {
     e.preventDefault()
-    if (!selectedInvoice) { return }
-    if (effectiveAmount <= 0) { setAmtError('Enter a valid amount.'); return }
-    if (effectiveAmount > sourcePayment.unapplied_amount + 0.005) {
-      setAmtError(`Cannot exceed unallocated balance of ${fmt(sourcePayment.unapplied_amount)}.`); return
+    if (!canSubmit) return
+
+    // Validate each selection
+    for (const inv of selectedInvoices) {
+      const sel = selections[inv.invoice_id]
+      const amt = parseFloat(sel.amount) || 0
+      if (amt <= 0) {
+        toast.error(`Enter a valid amount for ${inv.reference}.`)
+        return
+      }
+      if (amt > inv.invoice_balance + 0.005) {
+        toast.error(`Amount for ${inv.reference} exceeds its balance of ${fmt(inv.invoice_balance)}.`)
+        return
+      }
     }
-    if (effectiveAmount > selectedInvoice.invoice_balance + 0.005) {
-      setAmtError(`Cannot exceed invoice balance of ${fmt(selectedInvoice.invoice_balance)}.`); return
-    }
-    setAmtError('')
+
     setSaving(true)
-    try {
-      await customerService.applyCredit(customerId, {
-        invoice_id:        selectedInvoice.invoice_id,
-        source_payment_id: sourcePayment.payment_id,   // traces back to specific cash
-        amount:            effectiveAmount,
-        notes:             notes.trim() || undefined,
-      })
+    let applied = 0
+    let errors  = 0
+
+    for (let i = 0; i < selectedInvoices.length; i++) {
+      const inv = selectedInvoices[i]
+      const amt = parseFloat(selections[inv.invoice_id].amount)
+      setProgress(`Applying ${i + 1} of ${selectedInvoices.length}…`)
+      try {
+        await customerService.applyCredit(customerId, {
+          invoice_id:        inv.invoice_id,
+          source_payment_id: sourcePayment.payment_id,
+          amount:            amt,
+          notes:             notes.trim() || undefined,
+        })
+        applied++
+      } catch (err) {
+        errors++
+        toast.error(`Failed to apply to ${inv.reference}: ${err?.response?.data?.error ?? 'Unknown error'}`)
+      }
+    }
+
+    setSaving(false)
+    setProgress(null)
+
+    if (applied > 0) {
       toast.success(
-        fullyPaid
-          ? `${fmt(effectiveAmount)} applied — invoice fully paid!`
-          : `${fmt(effectiveAmount)} applied — ${fmt(invoiceAfter)} still owed on invoice.`
+        errors > 0
+          ? `Applied to ${applied} invoice(s). ${errors} failed.`
+          : `${fmt(totalApplying)} applied to ${applied} invoice(s).`
       )
       onSuccess()
-    } catch (err) {
-      toast.error(err?.response?.data?.error ?? 'Failed to apply credit.')
-    } finally {
-      setSaving(false)
     }
   }
 
   return (
-    <Modal isOpen onClose={onClose} title="Apply Unallocated Cash to Invoice" size="md">
+    <Modal isOpen onClose={onClose} title="Apply Unallocated Cash to Invoices" size="lg">
 
-      {/* ── Source payment card ────────────────────────────────────────── */}
+      {/* Source payment card */}
       <div className="mb-5 p-4 bg-violet-50 border border-violet-200 rounded-xl">
         <p className="text-xs text-violet-500 font-semibold uppercase tracking-wide mb-2">
           Cash Source — Unallocated Payment
@@ -131,7 +157,7 @@ export default function ApplyCreditModal({
             </p>
             <p className="text-xs text-violet-500 mt-0.5">
               {fmtDate(sourcePayment.date)} ·{' '}
-              {METHOD_LABEL[sourcePayment.payment_method] || sourcePayment.payment_method || 'Payment'}
+              {METHOD_LABEL[sourcePayment.payment_method] || sourcePayment.payment_method}
             </p>
             {sourcePayment.description && (
               <p className="text-xs text-violet-400 mt-0.5 italic truncate max-w-xs">
@@ -148,143 +174,148 @@ export default function ApplyCreditModal({
         </div>
       </div>
 
-      {/* ── Info note ─────────────────────────────────────────────────── */}
+      {/* Info note */}
       <div className="mb-4 flex items-start gap-3 px-4 py-3 rounded-lg
                       bg-blue-50 border border-blue-100 text-xs text-blue-700">
         <span className="text-base shrink-0">ℹ️</span>
         <p>
-          This transfers cash that is <strong>already in the system</strong> from this specific
-          payment to reduce the selected invoice. No new payment is collected from the customer.
+          Select one or more invoices to apply this cash to. Each invoice gets its own amount.
+          No new payment is collected — this allocates cash already in the system.
         </p>
       </div>
 
       <form onSubmit={handleSubmit} noValidate className="space-y-4">
 
-        {/* ── Invoice selector ────────────────────────────────────────── */}
-        <div>
-          <label className="block text-xs font-semibold text-slate-600 mb-1">
-            Apply To Invoice <span className="text-red-500">*</span>
-          </label>
-          {openInvoices.length === 0 ? (
-            <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-700">
-              No open invoices found for {customerName}. All invoices are already paid.
-            </div>
-          ) : (
-            <select
-              value={selectedInvoiceId}
-              onChange={e => handleInvoiceChange(e.target.value)}
-              className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm
-                         focus:outline-none focus:ring-2 focus:ring-violet-400 bg-white"
-            >
-              <option value="">— Select an open invoice —</option>
-              {openInvoices.map(inv => (
-                <option key={inv.invoice_id} value={String(inv.invoice_id)}>
-                  {inv.reference} · Balance due: {fmt(inv.invoice_balance)}
-                  {inv.description ? ` — ${inv.description}` : ''}
-                </option>
-              ))}
-            </select>
-          )}
-        </div>
-
-        {/* ── Amount input (shown only after invoice is selected) ─────── */}
-        {selectedInvoice && (
-          <div>
-            {/* Selected invoice balance summary */}
-            <div className="mb-3 p-3 bg-red-50 border border-red-200 rounded-lg
-                            flex items-center justify-between">
-              <div>
-                <p className="text-xs text-red-500 font-semibold uppercase tracking-wide">
-                  Invoice Balance Due
-                </p>
-                <p className="font-mono text-xs text-red-400 mt-0.5">{selectedInvoice.reference}</p>
-              </div>
-              <p className="text-xl font-bold text-red-700">{fmt(selectedInvoice.invoice_balance)}</p>
-            </div>
-
-            <label className="block text-xs font-semibold text-slate-600 mb-1">
-              Amount to Apply (USD)
+        {/* Invoice list */}
+        {openInvoices.length === 0 ? (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-700">
+            No open invoices found for {customerName}.
+          </div>
+        ) : (
+          <div className="space-y-2">
+            <label className="block text-xs font-semibold text-slate-600 mb-2">
+              Select Invoices to Apply To
             </label>
-            <input
-              type="number"
-              min="0.01"
-              max={maxApply}
-              step="0.01"
-              value={amount}
-              onChange={e => { setAmount(e.target.value); setAmtError('') }}
-              placeholder={`e.g. ${maxApply.toFixed(2)}`}
-              className={`w-full rounded-lg border px-3 py-2 text-sm font-mono
-                          focus:outline-none focus:ring-2 focus:ring-violet-400
-                          ${amtError ? 'border-red-400 bg-red-50' : 'border-slate-200'}`}
-            />
-            {amtError && <p className="text-xs text-red-600 mt-1">{amtError}</p>}
-            <p className="text-xs text-slate-400 mt-1">
-              Maximum: {fmt(maxApply)} (limited by{' '}
-              {sourcePayment.unapplied_amount <= selectedInvoice.invoice_balance
-                ? 'unallocated cash on this payment'
-                : 'invoice balance due'})
-            </p>
+            {openInvoices.map(inv => {
+              const sel     = selections[inv.invoice_id]
+              const checked = sel?.checked || false
+              const amt     = parseFloat(sel?.amount) || 0
+              const maxAmt  = Math.min(inv.invoice_balance, sourcePayment.unapplied_amount)
+              const overInv = amt > inv.invoice_balance + 0.005
 
-            {/* Quick-fill buttons */}
-            <div className="flex gap-2 mt-2">
-              <button type="button"
-                onClick={() => { setAmount(String(maxApply.toFixed(2))); setAmtError('') }}
-                className="text-xs px-2 py-1 rounded bg-violet-100 text-violet-700
-                           hover:bg-violet-200 font-medium">
-                Apply Max ({fmt(maxApply)})
-              </button>
-              <button type="button"
-                onClick={() => { setAmount(String((maxApply / 2).toFixed(2))); setAmtError('') }}
-                className="text-xs px-2 py-1 rounded bg-slate-100 text-slate-600 hover:bg-slate-200">
-                Apply Half
-              </button>
-            </div>
+              return (
+                <div key={inv.invoice_id}
+                  className={`rounded-xl border p-3 transition-all ${
+                    checked
+                      ? 'border-violet-300 bg-violet-50'
+                      : 'border-slate-200 bg-white hover:border-slate-300'
+                  }`}
+                >
+                  {/* Invoice row header */}
+                  <label className="flex items-center gap-3 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => toggleInvoice(inv.invoice_id, inv.invoice_balance)}
+                      className="w-4 h-4 accent-violet-600 shrink-0"
+                    />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-mono text-sm font-bold text-slate-800">
+                          {inv.reference}
+                        </span>
+                        <span className="text-sm font-bold text-red-600 shrink-0">
+                          {fmt(inv.invoice_balance)} due
+                        </span>
+                      </div>
+                      {inv.description && (
+                        <p className="text-xs text-slate-400 truncate mt-0.5">{inv.description}</p>
+                      )}
+                    </div>
+                  </label>
+
+                  {/* Amount input — shown when checked */}
+                  {checked && (
+                    <div className="mt-3 pl-7">
+                      <div className="flex items-center gap-2">
+                        <div className="flex-1">
+                          <input
+                            type="number"
+                            min="0.01"
+                            max={maxAmt}
+                            step="0.01"
+                            value={sel.amount}
+                            onChange={e => setAmount(inv.invoice_id, e.target.value)}
+                            placeholder={maxAmt.toFixed(2)}
+                            className={`w-full rounded-lg border px-3 py-1.5 text-sm font-mono
+                                        focus:outline-none focus:ring-2 focus:ring-violet-400
+                                        ${overInv ? 'border-red-400 bg-red-50' : 'border-slate-200'}`}
+                          />
+                          {overInv && (
+                            <p className="text-xs text-red-600 mt-1">
+                              Exceeds invoice balance of {fmt(inv.invoice_balance)}
+                            </p>
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setAmount(inv.invoice_id, maxAmt.toFixed(2))}
+                          className="text-xs px-2 py-1.5 rounded bg-violet-100 text-violet-700
+                                     hover:bg-violet-200 font-medium whitespace-nowrap shrink-0"
+                        >
+                          Max
+                        </button>
+                      </div>
+                      {/* Invoice result preview */}
+                      {amt > 0 && !overInv && (
+                        <p className={`text-xs mt-1 font-medium ${
+                          amt >= inv.invoice_balance - 0.005 ? 'text-emerald-600' : 'text-amber-600'
+                        }`}>
+                          {amt >= inv.invoice_balance - 0.005
+                            ? '✓ Invoice fully paid'
+                            : `${fmt(Math.max(0, inv.invoice_balance - amt))} will remain outstanding`}
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
           </div>
         )}
 
-        {/* ── Live preview ─────────────────────────────────────────────── */}
-        {selectedInvoice && effectiveAmount > 0 &&
-         effectiveAmount <= sourcePayment.unapplied_amount + 0.005 && (
+        {/* Running total bar */}
+        {totalApplying > 0 && (
           <div className={`rounded-xl border p-4 ${
-            fullyPaid ? 'bg-emerald-50 border-emerald-200' : 'bg-amber-50 border-amber-200'
+            overLimit ? 'bg-red-50 border-red-300' : 'bg-emerald-50 border-emerald-200'
           }`}>
-            <p className={`text-xs font-bold uppercase tracking-wide mb-3 ${
-              fullyPaid ? 'text-emerald-700' : 'text-amber-700'
-            }`}>
-              {fullyPaid ? '✓ Invoice will be fully paid' : '⚠ Invoice will be partially paid'}
-            </p>
             <div className="grid grid-cols-3 gap-3 text-center text-xs">
               <div>
-                <p className="text-slate-500 mb-0.5">Cash Applied</p>
-                <p className="font-bold text-violet-700 text-base">{fmt(effectiveAmount)}</p>
-              </div>
-              <div>
-                <p className="text-slate-500 mb-0.5">Invoice After</p>
-                <p className={`font-bold text-base ${
-                  fullyPaid ? 'text-emerald-600' : 'text-red-600'
-                }`}>
-                  {fmt(invoiceAfter)}
+                <p className="text-slate-500 mb-0.5">Total Applying</p>
+                <p className={`font-bold text-base ${overLimit ? 'text-red-600' : 'text-violet-700'}`}>
+                  {fmt(totalApplying)}
                 </p>
               </div>
               <div>
-                <p className="text-slate-500 mb-0.5">Unallocated Left</p>
-                <p className={`font-bold text-base ${
-                  creditAfter > 0 ? 'text-violet-600' : 'text-slate-400'
-                }`}>
-                  {fmt(creditAfter)}
+                <p className="text-slate-500 mb-0.5">Invoices Selected</p>
+                <p className="font-bold text-base text-slate-700">{selectedInvoices.length}</p>
+              </div>
+              <div>
+                <p className="text-slate-500 mb-0.5">Remaining After</p>
+                <p className={`font-bold text-base ${remainingUnallocated > 0 ? 'text-violet-600' : 'text-slate-400'}`}>
+                  {fmt(remainingUnallocated)}
                 </p>
               </div>
             </div>
-            {invoiceAfter > 0.005 && (
-              <p className="text-xs text-amber-700 mt-3 text-center">
-                After applying, <strong>{fmt(invoiceAfter)}</strong> will still need to be
-                collected as new cash.
+            {overLimit && (
+              <p className="text-xs text-red-600 font-semibold text-center mt-2">
+                ⚠ Total exceeds unallocated balance of {fmt(sourcePayment.unapplied_amount)}
               </p>
             )}
           </div>
         )}
 
-        {/* ── Notes ────────────────────────────────────────────────────── */}
+        {/* Notes */}
         <FormTextarea
           label="Notes (optional)"
           value={notes}
@@ -293,17 +324,21 @@ export default function ApplyCreditModal({
           rows={2}
         />
 
-        {/* ── Actions ──────────────────────────────────────────────────── */}
+        {/* Actions */}
         <div className="flex items-center gap-3 pt-2 border-t border-slate-100">
           <button
             type="submit"
-            disabled={saving || !selectedInvoice || effectiveAmount <= 0}
+            disabled={!canSubmit}
             className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold
                        bg-violet-600 hover:bg-violet-700 text-white transition-colors
                        disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
           >
             {saving && <ButtonSpinner />}
-            {saving ? 'Applying…' : effectiveAmount > 0 ? `Apply ${fmt(effectiveAmount)}` : 'Apply Cash'}
+            {saving
+              ? (progress || 'Applying…')
+              : totalApplying > 0
+                ? `Apply ${fmt(totalApplying)} to ${selectedInvoices.length} Invoice${selectedInvoices.length !== 1 ? 's' : ''}`
+                : 'Apply Cash'}
           </button>
           <button type="button" onClick={onClose}
             className="px-4 py-2.5 rounded-lg text-sm font-medium text-slate-600

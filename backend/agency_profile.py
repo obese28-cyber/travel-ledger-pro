@@ -3,26 +3,31 @@ AGENCY PROFILE -- Edit this file or use Admin > Settings in the app.
 Restart the backend after direct file edits.
 """
 
+import os
+
 AGENCY_NAME = "AXUM TRAVEL AND TOURS"
 
 AGENCY_ADDRESS_LINES = [
-    "Plot 14, Liberation Road",
-    "Accra, Ghana",
-    "P.O. Box CT 1234, Cantonments",
+    "Ground Floor, 35 Aseda House, 5th Crescent",
+    "Anyemi Kpakpa Road, Asylum Down, Accra, Ghana",
+    "GA-027-9732  |  P.O. Box YK 270 Kanda, Accra",
 ]
 
 AGENCY_PHONES = [
-    "+233 30 000 0000",
-    "+233 24 000 0000",
+    "Tel: +233 302 245 747",
+    "Mob: +233 24 004 4001",
+    "Mob: +233 50 557 6664",
 ]
 
 AGENCY_EMAILS = [
-    "info@axumtravel.com",
-    "tickets@axumtravel.com",
-    "www.axumtravel.com",
+    "info@axumtravels.com",
+    "sales@axumtravels.com",
+    "www.axumtravels.com",
 ]
 
-LOGO_PATH = None
+# Logo path — place your logo.jpg in backend/static/
+_BASE = os.path.dirname(os.path.abspath(__file__))
+LOGO_PATH = os.path.join(_BASE, "static", "logo.jpg")
 
 BANK_ACCOUNTS = [
     {
@@ -37,15 +42,8 @@ BANK_ACCOUNTS = [
     },
 ]
 
-SIGNATORY_LEFT = {
-    "name":  "NAME : ..............................",
-    "title": "Operations / Ticketing",
-}
-
-SIGNATORY_RIGHT = {
-    "name":  "NAME : ..............................",
-    "title": "Manager / Director",
-}
+SIGNATORY_TITLE = "Reservations Manager"
+SIGNATORY_NAME  = ""
 
 SERVICES = [
     "AIR TICKETS & RESERVATIONS",
@@ -58,13 +56,14 @@ SERVICES = [
 ]
 
 AGENCY_PROFILE = {
-    "name":            AGENCY_NAME,
-    "address_lines":   AGENCY_ADDRESS_LINES,
-    "phones":          AGENCY_PHONES,
-    "emails":          AGENCY_EMAILS,
-    "logo_path":       LOGO_PATH,
-    "bank_accounts":   BANK_ACCOUNTS,
-    "signatory_left":  SIGNATORY_LEFT,
-    "signatory_right": SIGNATORY_RIGHT,
-    "services":        SERVICES,
+    "name":             AGENCY_NAME,
+    "address_lines":    AGENCY_ADDRESS_LINES,
+    "phones":           AGENCY_PHONES,
+    "emails":           AGENCY_EMAILS,
+    "logo_path":        LOGO_PATH,
+    "bank_accounts":    BANK_ACCOUNTS,
+    "signatory_title":  SIGNATORY_TITLE,
+    "signatory_name":   SIGNATORY_NAME,
+    "services":         SERVICES,
+    "currency":         "GHS",
 }

@@ -1,16 +1,14 @@
 """
 services/pdf_service.py — Travel agency invoice PDF generation.
 
-Produces a professional A4 invoice matching the agency's standard layout:
-  - Company header (logo + name + address)
-  - Invoice number & title
-  - Passenger / service details
-  - Fare breakdown table
-  - Signature block
-  - Bank account details
+Layout matches the standard agency invoice format:
+  - Agency header (logo + name + contacts)
+  - TO / DATE / INVOICE NO. / FOR block
+  - Large centred INVOICE title
+  - Passenger table (NAME | ROUTING | AIRLINE | DEPARTURE | RETURN | CLASS | TICKET# | AMOUNT)
+  - TOTAL row
+  - Signatory block
   - Services footer
-
-Uses ReportLab canvas for pixel-precise layout.
 """
 
 import io
@@ -24,25 +22,43 @@ from reportlab.lib.utils import ImageReader
 
 
 # ── Colour palette ────────────────────────────────────────────────────────────
-DARK_RED   = colors.HexColor("#8B0000")
-DARK_GREY  = colors.HexColor("#333333")
-MID_GREY   = colors.HexColor("#666666")
-LIGHT_GREY = colors.HexColor("#CCCCCC")
-TABLE_BORDER = colors.HexColor("#444444")
-HEADER_FILL  = colors.HexColor("#F5F5F5")
+DARK_RED    = colors.HexColor("#8B0000")
+DARK_GREY   = colors.HexColor("#333333")
+MID_GREY    = colors.HexColor("#666666")
+LIGHT_GREY  = colors.HexColor("#CCCCCC")
+BLACK       = colors.HexColor("#000000")
+TABLE_HEAD  = colors.HexColor("#222222")
+TABLE_FILL  = colors.HexColor("#F7F7F7")
 
-PAGE_W, PAGE_H = A4   # 595.28 x 841.89 pt
-LM = 18 * mm          # left margin
-RM = PAGE_W - 18 * mm  # right margin
+PAGE_W, PAGE_H = A4          # 595.28 x 841.89 pt
+LM  = 15 * mm                # left margin
+RM  = PAGE_W - 15 * mm       # right margin
 CONTENT_W = RM - LM
 
 
 def _fmt(n):
-    """Format a number as comma-separated with 2 decimal places."""
     try:
         return f"{float(n):,.2f}"
     except (TypeError, ValueError):
         return "—"
+
+
+def _wrap(text, font, size, max_w):
+    """Split `text` into lines that each fit within `max_w` points."""
+    from reportlab.pdfbase.pdfmetrics import stringWidth
+    words = str(text).split()
+    lines, current = [], ""
+    for word in words:
+        test = (current + " " + word).strip()
+        if stringWidth(test, font, size) <= max_w:
+            current = test
+        else:
+            if current:
+                lines.append(current)
+            current = word
+    if current:
+        lines.append(current)
+    return lines or [""]
 
 
 def _date(d):
@@ -53,427 +69,452 @@ def _date(d):
             d = datetime.fromisoformat(d.replace("Z", "+00:00"))
         except ValueError:
             return d
-    return d.strftime("%d/%m/%Y") if hasattr(d, "strftime") else str(d)
+    return d.strftime("%d %B %Y") if hasattr(d, "strftime") else str(d)
 
 
-def _draw_hline(c, x1, y, x2, width=0.5, color=None):
+def _line(c, x1, y1, x2, lw=0.5, color=None, dash=None, y2=None):
     c.setStrokeColor(color or LIGHT_GREY)
-    c.setLineWidth(width)
-    c.line(x1, y, x2, y)
+    c.setLineWidth(lw)
+    if dash:
+        c.setDash(*dash)
+    c.line(x1, y1, x2, y2 if y2 is not None else y1)
+    if dash:
+        c.setDash()
 
 
 def _text(c, x, y, txt, font="Helvetica", size=9, color=None, align="left"):
     c.setFont(font, size)
     c.setFillColor(color or DARK_GREY)
+    txt = str(txt)
     if align == "right":
-        c.drawRightString(x, y, str(txt))
+        c.drawRightString(x, y, txt)
     elif align == "center":
-        c.drawCentredString(x, y, str(txt))
+        c.drawCentredString(x, y, txt)
     else:
-        c.drawString(x, y, str(txt))
+        c.drawString(x, y, txt)
 
 
 def generate_invoice_pdf(invoice_data: dict, agency: dict | None = None) -> bytes:
-    """
-    Generate a PDF invoice and return as bytes.
-
-    invoice_data — dict from Invoice.to_dict() + payments list
-    agency       — optional dict with agency branding info:
-                   name, address_lines (list), phones (list), emails (list),
-                   website, bank_accounts (list of {bank, account, label}),
-                   services (list of strings), logo_path (file path or None)
-    """
+    """Return PDF bytes for the given invoice."""
     if agency is None:
         agency = {}
-
     buf = io.BytesIO()
-    c = canvas.Canvas(buf, pagesize=A4)
-    c.setTitle(f"Invoice {invoice_data.get('invoice_number', '')}")
-
-    _draw_page(c, invoice_data, agency)
-
-    c.save()
+    cv = canvas.Canvas(buf, pagesize=A4)
+    cv.setTitle(f"Invoice {invoice_data.get('invoice_number', '')}")
+    _draw_page(cv, invoice_data, agency)
+    cv.save()
     buf.seek(0)
     return buf.read()
 
 
-def _draw_page(c, inv, agency):
-    y = PAGE_H - 12 * mm   # start near top
-
-    # ── 1. Company header ─────────────────────────────────────────────────────
-    y = _draw_header(c, y, agency)
-
-    # ── 2. Invoice number + title ─────────────────────────────────────────────
-    y = _draw_invoice_title(c, y, inv)
-
-    # ── 3. Passenger / service details ────────────────────────────────────────
-    y = _draw_details(c, y, inv)
-
-    # ── 4. Fare breakdown table ───────────────────────────────────────────────
-    y = _draw_fare_table(c, y, inv)
-
-    # ── 5. Signature block ────────────────────────────────────────────────────
-    y = _draw_signatures(c, y, agency)
-
-    # ── 6. Footer services bar ────────────────────────────────────────────────
-    _draw_footer(c, agency)
+def _draw_page(cv, inv, agency):
+    y = PAGE_H - 10 * mm
+    y = _draw_agency_header(cv, y, agency)
+    y = _draw_invoice_meta(cv, y, inv, agency)
+    y = _draw_invoice_title(cv, y)
+    y = _draw_passenger_table(cv, y, inv, agency)
+    _draw_signatory(cv, y, agency)
+    _draw_footer(cv, agency)
 
 
-# ── Header ────────────────────────────────────────────────────────────────────
-def _draw_header(c, y, agency):
-    logo_area_w = 52 * mm
-    info_x = LM + logo_area_w + 6 * mm
-    top = y
-
-    # Logo box (placeholder or real image)
+# ── 1. Agency header ──────────────────────────────────────────────────────────
+def _draw_agency_header(cv, y, agency):
+    logo_w = 42 * mm
+    logo_h = 22 * mm
     logo_path = agency.get("logo_path")
+
+    logo_ok = False
     if logo_path:
         try:
-            img = ImageReader(logo_path)
-            c.drawImage(img, LM, top - 28 * mm, width=48 * mm, height=28 * mm,
-                        preserveAspectRatio=True, mask="auto")
+            import os
+            if os.path.exists(logo_path):
+                img = ImageReader(logo_path)
+                cv.drawImage(img, LM, y - logo_h, width=logo_w, height=logo_h,
+                             preserveAspectRatio=True, mask="auto")
+                logo_ok = True
         except Exception:
-            _draw_logo_placeholder(c, LM, top - 28 * mm, 48 * mm, 28 * mm)
-    else:
-        _draw_logo_placeholder(c, LM, top - 28 * mm, 48 * mm, 28 * mm)
+            pass
+    if not logo_ok:
+        _placeholder_logo(cv, LM, y - logo_h, logo_w, logo_h)
 
-    # Company name (bold, dark red)
+    info_x = LM + logo_w + 5 * mm
+    right_col = LM + CONTENT_W * 0.62  # second column for phones/emails
+
+    # Company name
     name = agency.get("name", "TRAVEL LEDGER PRO")
-    _text(c, info_x, top - 6 * mm, name.upper(),
-          font="Helvetica-Bold", size=13, color=DARK_RED)
+    _text(cv, info_x, y - 5 * mm, name.upper(),
+          font="Helvetica-Bold", size=12, color=DARK_RED)
 
-    # Address lines
-    addr_lines = agency.get("address_lines", [
-        "Your Agency Address Line 1",
-        "City, Country",
-    ])
-    ay = top - 11 * mm
-    for line in addr_lines:
-        _text(c, info_x, ay, line, size=8, color=MID_GREY)
-        ay -= 4 * mm
+    # Address lines (compact)
+    ay = y - 9.5 * mm
+    for line in agency.get("address_lines", ["Your Agency Address", "City, Country"]):
+        _text(cv, info_x, ay, line, size=7.5, color=MID_GREY)
+        ay -= 3.8 * mm
 
-    # Phones + emails side by side
+    # Phones (left sub-column) and emails (right sub-column) on same rows
     phones = agency.get("phones", [])
     emails = agency.get("emails", [])
-    py = ay - 2 * mm
-    for i, ph in enumerate(phones[:3]):
-        _text(c, info_x, py - i * 4 * mm, ph, size=8, color=DARK_GREY)
-    for i, em in enumerate(emails[:3]):
-        _text(c, info_x + 38 * mm, py - i * 4 * mm, em, size=8, color=DARK_GREY)
+    max_rows = max(len(phones), len(emails))
+    py = ay - 1 * mm
+    for i in range(min(max_rows, 3)):
+        if i < len(phones):
+            _text(cv, info_x, py, phones[i], size=7.5, color=DARK_GREY)
+        if i < len(emails):
+            _text(cv, right_col, py, emails[i], size=7.5, color=DARK_GREY)
+        py -= 3.8 * mm
 
-    # Vertical separator line
-    c.setStrokeColor(DARK_GREY)
-    c.setLineWidth(1)
-    c.line(info_x - 3 * mm, top - 2 * mm, info_x - 3 * mm, top - 32 * mm)
-
-    return top - 36 * mm
-
-
-def _draw_logo_placeholder(c, x, y, w, h):
-    """Draw a simple placeholder box when no logo is set."""
-    c.setStrokeColor(LIGHT_GREY)
-    c.setFillColor(colors.HexColor("#F0F0F0"))
-    c.setLineWidth(0.5)
-    c.rect(x, y, w, h, fill=1, stroke=1)
-    c.setFillColor(LIGHT_GREY)
-    c.setFont("Helvetica", 7)
-    c.drawCentredString(x + w / 2, y + h / 2 - 3, "AGENCY LOGO")
+    # Separator — below the tallest of logo or text content
+    content_bottom = py - 1 * mm
+    logo_bottom    = y - logo_h - 2 * mm
+    bottom = min(content_bottom, logo_bottom)  # whichever is lower
+    _line(cv, LM, bottom, RM, lw=1.2, color=BLACK)
+    return bottom - 4 * mm
 
 
-# ── Invoice number + title ────────────────────────────────────────────────────
-def _draw_invoice_title(c, y, inv):
-    _draw_hline(c, LM, y, RM, width=0.8, color=DARK_GREY)
-    y -= 5 * mm
+def _placeholder_logo(cv, x, y, w, h):
+    cv.setStrokeColor(LIGHT_GREY)
+    cv.setFillColor(colors.HexColor("#F0F0F0"))
+    cv.setLineWidth(0.5)
+    cv.rect(x, y, w, h, fill=1, stroke=1)
+    cv.setFillColor(LIGHT_GREY)
+    cv.setFont("Helvetica", 7)
+    cv.drawCentredString(x + w / 2, y + h / 2 - 3, "AGENCY LOGO")
 
-    inv_num = inv.get("invoice_number", "—")
-    _text(c, RM, y, f"INVOICE NO:   {inv_num}",
-          font="Helvetica-Bold", size=10, color=DARK_GREY, align="right")
-    y -= 7 * mm
 
-    # Title — use service type from first item if available
+# ── 2. Invoice meta block (TO / DATE / INVOICE NO / FOR) ─────────────────────
+def _draw_invoice_meta(cv, y, inv, agency):
+    lh = 6 * mm
+
+    # All three values start at the same x — wide enough for "INVOICE NO.:"
+    VAL_X = LM + 34 * mm
+
+    # TO:  [customer name / company]
+    to_name = inv.get("customer_name") or "—"
+    _text(cv, LM,   y, "TO:",   font="Helvetica-Bold", size=10, color=BLACK)
+    _text(cv, VAL_X, y, to_name.upper(), font="Helvetica-Bold", size=10, color=BLACK)
+    # Date on the right
+    _text(cv, RM, y, _date(inv.get("issue_date")),
+          font="Helvetica", size=10, color=DARK_GREY, align="right")
+    y -= lh
+
+    # INVOICE NO.:
+    inv_num = inv.get("invoice_number") or "—"
+    _text(cv, LM,   y, "INVOICE NO.:", font="Helvetica-Bold", size=10, color=BLACK)
+    _text(cv, VAL_X, y, inv_num, font="Helvetica-Bold", size=10, color=BLACK)
+    y -= lh
+
+    # FOR:
     items = inv.get("items") or []
-    service_desc = ""
-    if items:
-        first = items[0]
-        st = (first.get("service_type") or "").replace("_", " ").upper()
-        desc = first.get("description") or ""
-        service_desc = st or desc[:40]
+    service_types = []
+    for item in items:
+        st = (item.get("service_type") or "").replace("_", " ").upper()
+        if st and st not in service_types:
+            service_types.append(st)
+    for_text = ", ".join(service_types) if service_types else "TRAVEL SERVICES"
+    _text(cv, LM,   y, "FOR:", font="Helvetica-Bold", size=10, color=BLACK)
+    _text(cv, VAL_X, y, for_text, font="Helvetica-Bold", size=10, color=BLACK)
+    y -= lh + 2 * mm
 
-    title = service_desc or "TRAVEL SERVICE INVOICE"
-    cx = LM + CONTENT_W / 2
-
-    # Underline + bold title
-    c.setFont("Helvetica-Bold", 12)
-    title_w = c.stringWidth(title, "Helvetica-Bold", 12)
-    c.setFillColor(DARK_GREY)
-    c.drawCentredString(cx, y, title)
-    c.setLineWidth(0.8)
-    c.setStrokeColor(DARK_GREY)
-    c.line(cx - title_w / 2, y - 1, cx + title_w / 2, y - 1)
-
-    y -= 7 * mm
-    _draw_hline(c, LM, y, RM, width=0.5)
-    return y - 5 * mm
-
-
-# ── Detail rows ───────────────────────────────────────────────────────────────
-def _bold_label(c, x, y, label, value, value_font="Helvetica", lsize=9, vsize=9):
-    """Draw 'LABEL: value' with label in bold-underline style."""
-    c.setFont("Helvetica-Bold", lsize)
-    c.setFillColor(DARK_GREY)
-    label_str = f"{label}:"
-    lw = c.stringWidth(label_str, "Helvetica-Bold", lsize)
-    c.drawString(x, y, label_str)
-    # underline the label
-    c.setLineWidth(0.5)
-    c.setStrokeColor(DARK_GREY)
-    c.line(x, y - 1, x + lw, y - 1)
-    # value
-    vx = x + lw + 3
-    c.setFont(value_font, vsize)
-    c.setFillColor(DARK_GREY)
-    c.drawString(vx, y, str(value) if value else "—")
-    return lw + 3 + c.stringWidth(str(value or "—"), value_font, vsize)
-
-
-def _draw_details(c, y, inv):
-    lh = 6.5 * mm   # line height
-
-    # NAME OF PASSENGER
-    pax = inv.get("customer_name") or "—"
-    _bold_label(c, LM, y, "NAME OF PASSENGER", f"  1.  {pax.upper()}", lsize=9, vsize=9)
-    y -= lh
-
-    # NAME OF COMPANY + DATE OF ISSUE (same line)
-    company = inv.get("customer_company") or inv.get("customer_nationality") or "—"
-    w = _bold_label(c, LM, y, "NAME OF COMPANY", company.upper(), lsize=9)
-    date_x = LM + 85 * mm
-    _bold_label(c, date_x, y, "DATE OF ISSUE", _date(inv.get("issue_date")), lsize=9)
-    y -= lh
-
-    # Items detail rows (airline, ticket number, PNR etc. from first item)
-    items = inv.get("items") or []
-    booking_ref = inv.get("booking_ref") or "—"
-
-    if items:
-        first = items[0]
-        # Prefer airline_name (from flight booking) over generic supplier_name
-        airline_name = first.get("airline_name")
-        supplier     = airline_name or first.get("supplier_name") or "—"
-        label        = "AIRLINE" if airline_name else "SUPPLIER / AIRLINE"
-        _bold_label(c, LM, y, label, supplier.upper(), lsize=9)
-
-        # Show ticket number on same line (right half) if available
-        ticket = first.get("ticket_number")
-        if ticket:
-            ticket_x = LM + 90 * mm
-            _bold_label(c, ticket_x, y, "TICKET NO.", ticket, lsize=9)
-        y -= lh
-
-    # Booking reference
-    _bold_label(c, LM, y, "BOOKING REFERENCE", booking_ref, lsize=9)
-    y -= lh
-
-    # Invoice notes (PNR / extra info)
-    notes = inv.get("notes") or ""
-    if notes:
-        _bold_label(c, LM, y, "NOTES", notes, lsize=9)
-        y -= lh
-
-    y -= 2 * mm
     return y
 
 
-# ── Fare Breakdown Table ──────────────────────────────────────────────────────
-def _draw_fare_table(c, y, inv):
-    items = inv.get("items") or []
+# ── 3. "INVOICE" title ────────────────────────────────────────────────────────
+def _draw_invoice_title(cv, y):
+    cx = LM + CONTENT_W / 2
+    _text(cv, cx, y, "INVOICE", font="Helvetica-Bold", size=18, color=BLACK, align="center")
+    # underline
+    tw = cv.stringWidth("INVOICE", "Helvetica-Bold", 18)
+    _line(cv, cx - tw / 2, y - 1.5, cx + tw / 2, lw=1.2, color=BLACK)
+    return y - 8 * mm
 
-    # Column widths (total = CONTENT_W ~159mm)
-    col_label_w = 38 * mm    # "FARE BREAKDOWN"
-    col_desc_w  = 60 * mm    # description / item name
-    col_amount_w= 36 * mm    # amount
-    col_extra_w = CONTENT_W - col_label_w - col_desc_w - col_amount_w
 
-    row_h = 7 * mm
-    header_h = 7 * mm
+# ── 4. Passenger table ────────────────────────────────────────────────────────
+# Columns: #/NAME | ROUTING | AIRLINE | DEPART | RETURN | CLASS | TICKET# | AMOUNT
+COL_NAME    = 40 * mm
+COL_ROUTING = 22 * mm
+COL_AIRLINE = 16 * mm
+COL_DEPART  = 18 * mm
+COL_RETURN  = 18 * mm
+COL_CLASS   = 20 * mm
+COL_TICKET  = 28 * mm   # wider — ticket numbers are long
+# AMOUNT fills the rest
+COL_AMOUNT  = CONTENT_W - COL_NAME - COL_ROUTING - COL_AIRLINE - COL_DEPART - COL_RETURN - COL_CLASS - COL_TICKET
 
-    # All rows: (left_label, description, amount)
-    rows = []
-    for item in items:
-        qty    = item.get("quantity") or 1
-        price  = item.get("unit_price") or item.get("selling_price") or 0
-        desc   = item.get("description") or item.get("service_type") or ""
-        # Append airline + ticket number to description for flight items
-        airline = item.get("airline_name")
-        ticket  = item.get("ticket_number")
-        if airline:
-            desc = f"{desc}  |  {airline}"
-        if ticket:
-            desc = f"{desc}  ({ticket})"
-        rows.append(("", desc, f"{_fmt(price * qty)}"))
+ROW_H  = 7.5 * mm
+HEAD_H = 8 * mm
 
-    # Standard breakdown rows
-    subtotal    = inv.get("subtotal") or inv.get("total_amount") or 0
-    tax_amount  = inv.get("tax_amount") or 0
-    total       = inv.get("total_amount") or 0
-    amount_paid = inv.get("amount_paid") or 0
-    balance_due = inv.get("balance_due") or 0
 
-    # Add totals section
-    rows.append(("", "SUM TOTAL",  _fmt(subtotal)))
-    if tax_amount:
-        rows.append(("", f"TAX ({tax_amount})", ""))
-    rows.append(("GRAND TOTAL", "", _fmt(total)))
+def _col_xs():
+    """Return left x-coordinate for each column."""
+    xs = [LM]
+    for w in [COL_NAME, COL_ROUTING, COL_AIRLINE, COL_DEPART, COL_RETURN, COL_CLASS, COL_TICKET]:
+        xs.append(xs[-1] + w)
+    return xs  # 8 values; xs[7] is start of AMOUNT col
 
-    table_h = header_h + row_h * len(rows) + 2 * mm
+
+def _draw_passenger_table(cv, y, inv, agency):
+    items    = inv.get("items") or []
+    xs       = _col_xs()
+    amt_x    = RM
+    currency = agency.get("currency", "USD")
+
+    # usable widths per column (minus 4pt padding)
+    col_max_w = [
+        COL_NAME    - 4,
+        COL_ROUTING - 4,
+        COL_AIRLINE - 4,
+        COL_DEPART  - 4,
+        COL_RETURN  - 4,
+        COL_CLASS   - 4,
+        COL_TICKET  - 4,
+        COL_AMOUNT  - 4,
+    ]
+
+    LINE_H  = 3.8 * mm   # height per text line inside a row
+    PAD_V   = 3.0 * mm   # top + bottom padding per row (total)
+    MIN_ROW = 7.5 * mm   # minimum row height
+
+    def row_lines(item, idx):
+        """Return the wrapped lines for each column of this item."""
+        pax_name = item.get("passenger_name") or item.get("description") or f"Passenger {idx+1}"
+        routing  = item.get("routing") or item.get("destination") or "—"
+        airline  = item.get("airline_name") or item.get("supplier_name") or "—"
+        dep      = _date(item.get("travel_date") or item.get("departure_date") or "")
+        ret      = _date(item.get("return_date") or "")
+        cls      = item.get("travel_class") or item.get("service_class") or "Economy Class"
+        ticket   = item.get("ticket_number") or ""
+        price    = float(item.get("selling_price") or item.get("unit_price") or 0)
+        qty      = float(item.get("quantity") or 1)
+        amount   = price * qty
+
+        return [
+            _wrap(f"{idx+1}.  {pax_name.upper()}", "Helvetica-Bold", 8, col_max_w[0]),
+            _wrap(routing.upper(),  "Helvetica-Bold", 8, col_max_w[1]),
+            _wrap(airline.upper(),  "Helvetica-Bold", 8, col_max_w[2]),
+            _wrap(dep if dep != "—" else "", "Helvetica", 7.5, col_max_w[3]),
+            _wrap(ret if ret != "—" else "", "Helvetica", 7.5, col_max_w[4]),
+            _wrap(cls.title(),      "Helvetica", 7.5, col_max_w[5]),
+            _wrap(ticket,           "Helvetica", 7.5, col_max_w[6]),
+            [_fmt(amount)],   # currency shown in header — no prefix per row
+        ]
+
+    # Pre-compute all rows so we know heights before drawing
+    all_row_lines = [row_lines(item, idx) for idx, item in enumerate(items)]
+    row_heights   = [
+        max(MIN_ROW, max(len(cols) for cols in cols_list) * LINE_H + PAD_V)
+        for cols_list in all_row_lines
+    ]
+
     table_top = y
-    table_bottom = table_top - table_h
 
-    # Outer border
-    c.setStrokeColor(TABLE_BORDER)
-    c.setLineWidth(0.8)
-    c.rect(LM, table_bottom, CONTENT_W, table_h, fill=0, stroke=1)
+    # ── Header row ────────────────────────────────────────────────────────────
+    cv.setFillColor(TABLE_HEAD)
+    cv.rect(LM, table_top - HEAD_H, CONTENT_W, HEAD_H, fill=1, stroke=0)
 
-    # Header row background
-    c.setFillColor(HEADER_FILL)
-    c.rect(LM, table_top - header_h, CONTENT_W, header_h, fill=1, stroke=0)
+    headers = ["NAME OF PASSENGER", "ROUTING", "AIRLINE",
+               "DEPARTURE\nDATE", "RETURN\nDATE", "CLASS", "TICKET #",
+               f"AMOUNT\n({currency})"]
 
-    # Header text
-    _text(c, LM + 3, table_top - header_h + 2 * mm,
-          "FARE BREAKDOWN", font="Helvetica-Bold", size=8, color=DARK_GREY)
-    _text(c, LM + col_label_w + 3, table_top - header_h + 2 * mm,
-          "DESCRIPTION", font="Helvetica-Bold", size=8, color=DARK_GREY)
-    _text(c, RM - col_extra_w - 3, table_top - header_h + 2 * mm,
-          "AMOUNT", font="Helvetica-Bold", size=8, color=DARK_GREY, align="right")
+    for i, (hdr, xc) in enumerate(zip(headers, xs)):
+        lines = hdr.split("\n")
+        if len(lines) == 2:
+            _text(cv, xc + 2, table_top - 4.5 * mm, lines[0],
+                  font="Helvetica-Bold", size=6.5, color=colors.white)
+            _text(cv, xc + 2, table_top - 7 * mm, lines[1],
+                  font="Helvetica-Bold", size=6.5, color=colors.white)
+        else:
+            if i == len(headers) - 1:
+                _text(cv, amt_x - 2, table_top - 5.5 * mm, hdr,
+                      font="Helvetica-Bold", size=6.5, color=colors.white, align="right")
+            else:
+                _text(cv, xc + 2, table_top - 5.5 * mm, hdr,
+                      font="Helvetica-Bold", size=6.5, color=colors.white)
 
-    # Header separator
-    hy = table_top - header_h
-    _draw_hline(c, LM, hy, RM, width=0.8, color=TABLE_BORDER)
+    ry = table_top - HEAD_H
 
-    # Rows
-    ry = hy
-    for i, (lbl, desc, amt) in enumerate(rows):
-        ry -= row_h
-        # alternating light bg
-        if i % 2 == 0:
-            c.setFillColor(colors.HexColor("#FAFAFA"))
-            c.rect(LM + 0.4, ry, CONTENT_W - 0.8, row_h, fill=1, stroke=0)
+    # ── Item rows ─────────────────────────────────────────────────────────────
+    total_amount = 0.0
 
-        is_grand = lbl == "GRAND TOTAL"
-        font = "Helvetica-Bold" if is_grand else "Helvetica"
-        size = 9 if is_grand else 8.5
+    for idx, (item, cols_list, rh) in enumerate(zip(items, all_row_lines, row_heights)):
+        row_bot = ry - rh
 
-        # Left label (only on first item row or grand total)
-        if i == 0:
-            _text(c, LM + 3, ry + 2 * mm, "FARE BREAKDOWN",
-                  font="Helvetica-Bold", size=8, color=DARK_GREY)
-        elif is_grand:
-            _text(c, LM + 3, ry + 2 * mm, "GRAND TOTAL",
-                  font="Helvetica-Bold", size=9, color=DARK_GREY)
+        # alternating fill
+        if idx % 2 == 0:
+            cv.setFillColor(TABLE_FILL)
+            cv.rect(LM, row_bot, CONTENT_W, rh, fill=1, stroke=0)
 
-        # Description
-        _text(c, LM + col_label_w + 3, ry + 2 * mm, desc,
-              font=font, size=size, color=DARK_GREY)
+        # draw each column — vertically centred in the row
+        for col_i, (col_lines, xc) in enumerate(zip(cols_list, xs)):
+            n_lines   = len(col_lines)
+            # Centre the text block: mid of row, offset up by half the block height
+            block_h   = n_lines * LINE_H
+            first_y   = row_bot + rh / 2 + block_h / 2 - LINE_H * 0.72
 
-        # Amount (right-aligned in amount column)
-        amt_x = LM + col_label_w + col_desc_w + col_amount_w - 3
-        if amt:
-            _text(c, amt_x, ry + 2 * mm, amt,
-                  font=font, size=size, color=DARK_GREY, align="right")
+            if col_i == 7:  # amount — right-aligned, vertically centred
+                cy = row_bot + rh / 2 - LINE_H * 0.3
+                _text(cv, amt_x - 2, cy, col_lines[0],
+                      font="Helvetica-Bold", size=8.5, color=BLACK, align="right")
+            else:
+                f   = "Helvetica-Bold" if col_i in (0, 1, 2) else "Helvetica"
+                sz  = 8 if col_i in (0, 1, 2) else 7.5
+                clr = BLACK if col_i in (0, 1, 2) else DARK_GREY
+                ty  = first_y
+                for line in col_lines:
+                    _text(cv, xc + 2, ty, line, font=f, size=sz, color=clr)
+                    ty -= LINE_H
 
-        # Row separator
-        _draw_hline(c, LM, ry, RM, width=0.3, color=LIGHT_GREY)
+        # accumulate total
+        price  = float(item.get("selling_price") or item.get("unit_price") or 0)
+        qty    = float(item.get("quantity") or 1)
+        total_amount += price * qty
 
-    # Vertical column dividers
-    c.setStrokeColor(TABLE_BORDER)
-    c.setLineWidth(0.5)
-    x1 = LM + col_label_w
-    x2 = LM + col_label_w + col_desc_w
-    c.line(x1, table_top, x1, table_bottom)
-    c.line(x2, table_top, x2, table_bottom)
+        _line(cv, LM, row_bot, RM, lw=0.3, color=LIGHT_GREY)
+        ry = row_bot
 
-    y = table_bottom - 4 * mm
+    # ── 4 empty spacer rows (lines only, no content) ──────────────────────────
+    EMPTY_ROW_H = 7 * mm
+    for _ in range(4):
+        empty_bot = ry - EMPTY_ROW_H
+        _line(cv, LM, empty_bot, RM, lw=0.3, color=LIGHT_GREY)
+        ry = empty_bot
 
-    # Payment summary below table
+    # ── TOTAL row — gap then dark striking bar ────────────────────────────────
+    TOTAL_H     = 9 * mm
+    total_row_y = ry - TOTAL_H
+
+    # Dark background across full width
+    cv.setFillColor(DARK_RED)
+    cv.rect(LM, total_row_y, CONTENT_W, TOTAL_H, fill=1, stroke=0)
+
+    inv_total = float(inv.get("total_amount") or total_amount)
+
+    # "TOTAL" label centred in the left-side columns
+    mid_label_x = LM + (xs[7] - LM) / 2
+    _text(cv, mid_label_x, total_row_y + 3 * mm, "TOTAL",
+          font="Helvetica-Bold", size=11, color=colors.white, align="center")
+
+    # Amount right-aligned — large and prominent
+    _text(cv, amt_x - 3, total_row_y + 3 * mm,
+          _fmt(inv_total),
+          font="Helvetica-Bold", size=12, color=colors.white, align="right")
+
+    # outer border of entire table (including total)
+    cv.setStrokeColor(DARK_GREY)
+    cv.setLineWidth(0.8)
+    cv.rect(LM, total_row_y, CONTENT_W, table_top - total_row_y, fill=0, stroke=1)
+
+    # vertical column dividers (data + empty rows, not total)
+    cv.setLineWidth(0.4)
+    cv.setStrokeColor(colors.HexColor("#BBBBBB"))
+    for xc in xs[1:]:
+        cv.line(xc, table_top - HEAD_H, xc, total_row_y)
+
+    # header bottom separator
+    _line(cv, LM, table_top - HEAD_H, RM, lw=0.8, color=DARK_GREY)
+
+    bottom_y = total_row_y - 5 * mm
+
+    # Payment summary if partially paid
+    amount_paid = float(inv.get("amount_paid") or 0)
+    balance_due = float(inv.get("balance_due") or max(0, inv_total - amount_paid))
     if amount_paid > 0:
-        _text(c, RM, y, f"Amount Paid:   {_fmt(amount_paid)}",
-              font="Helvetica", size=9, color=MID_GREY, align="right")
-        y -= 5 * mm
-        bal_color = colors.HexColor("#8B0000") if balance_due > 0 else colors.HexColor("#006400")
-        _text(c, RM, y, f"Balance Due:   {_fmt(balance_due)}",
+        _text(cv, RM, bottom_y,
+              f"Amount Paid:   {_fmt(amount_paid)}",
+              size=9, color=MID_GREY, align="right")
+        bottom_y -= 5.5 * mm
+        bal_color = colors.HexColor("#8B0000") if balance_due > 0.005 else colors.HexColor("#006400")
+        _text(cv, RM, bottom_y,
+              f"Balance Due:   {_fmt(balance_due)}",
               font="Helvetica-Bold", size=10, color=bal_color, align="right")
-        y -= 4 * mm
+        bottom_y -= 4 * mm
 
-    return y - 6 * mm
+    return bottom_y - 4 * mm
 
 
-# ── Signature block ───────────────────────────────────────────────────────────
-def _draw_signatures(c, y, agency):
-    sig_y = y
-    mid = LM + CONTENT_W / 2
+# ── 5. Signatory + Banking — fixed near footer ────────────────────────────────
+def _draw_signatory(cv, y, agency):
+    """
+    Draws banking details (left) and signature block (right) at a fixed
+    position just above the footer bar, regardless of table length.
+    """
+    footer_top  = 8 * mm + 11 * mm          # top of footer bar
+    block_h     = 32 * mm                   # height of this section
+    section_top = footer_top + block_h      # where the section starts
 
-    # Checked By
-    _text(c, LM, sig_y, "CHECKED BY:", font="Helvetica-Bold", size=9)
-    c.setLineWidth(0.5)
-    c.setDash(3, 2)
-    c.line(LM + 28 * mm, sig_y + 1, mid - 5 * mm, sig_y + 1)
-    c.setDash()
+    # ── full-width separator line above the block ─────────────────────────
+    _line(cv, LM, section_top, RM, lw=1.0, color=BLACK)
 
-    # Approved By
-    _text(c, mid + 5 * mm, sig_y, "APPROVED BY:", font="Helvetica-Bold", size=9)
-    c.setDash(3, 2)
-    c.line(mid + 35 * mm, sig_y + 1, RM, sig_y + 1)
-    c.setDash()
-
-    sig_y -= 5 * mm
-
-    # Name + bank details (left column)
-    signatory_left  = agency.get("signatory_left",  {"name": "NAME : ..............................", "title": ""})
-    signatory_right = agency.get("signatory_right", {"name": "NAME : ..............................", "title": ""})
-
-    _text(c, LM, sig_y, signatory_left.get("name", ""), font="Helvetica-Bold", size=8.5)
-    _text(c, mid + 5 * mm, sig_y, signatory_right.get("name", ""), font="Helvetica-Bold", size=8.5)
-    sig_y -= 4 * mm
-
-    agency_name = agency.get("name", "Travel Agency")
-    _text(c, LM, sig_y, agency_name, size=8, color=MID_GREY)
-    _text(c, mid + 5 * mm, sig_y, agency_name, size=8, color=MID_GREY)
-    sig_y -= 4 * mm
-
-    # Bank accounts
+    # ── LEFT — Banking details ────────────────────────────────────────────
     banks = agency.get("bank_accounts", [])
-    left_banks  = banks[::2]   # even indices  → left column
-    right_banks = banks[1::2]  # odd indices   → right column
+    if banks:
+        bx = LM
+        by = section_top - 5 * mm
 
-    for i, bk in enumerate(left_banks[:2]):
-        _text(c, LM, sig_y - i * 4 * mm, bk.get("bank", ""), size=8, color=DARK_GREY)
-    for i, bk in enumerate(right_banks[:2]):
-        _text(c, mid + 5 * mm, sig_y - i * 4 * mm, bk.get("bank", ""), size=8, color=DARK_GREY)
-    sig_y -= 4 * mm
+        # "BANKING DETAILS" header with small red accent bar
+        cv.setFillColor(DARK_RED)
+        cv.rect(bx, by + 1 * mm, 2 * mm, 4 * mm, fill=1, stroke=0)
+        _text(cv, bx + 3.5 * mm, by + 1.5 * mm, "BANKING DETAILS",
+              font="Helvetica-Bold", size=9, color=BLACK)
+        by -= 6 * mm
 
-    for i, bk in enumerate(left_banks[:2]):
-        _text(c, LM, sig_y - i * 4 * mm, bk.get("account", ""), size=8, color=DARK_GREY)
-    for i, bk in enumerate(right_banks[:2]):
-        _text(c, mid + 5 * mm, sig_y - i * 4 * mm, bk.get("account", ""), size=8, color=DARK_GREY)
-    sig_y -= 4 * mm
+        col_w   = CONTENT_W * 0.5 / max(len(banks[:2]), 1)
+        for bi, bk in enumerate(banks[:2]):
+            bkx = LM + bi * col_w
+            bky = by
+            # bank name
+            _text(cv, bkx, bky, bk.get("bank", ""),
+                  font="Helvetica-Bold", size=8, color=BLACK)
+            bky -= 4.2 * mm
+            # account number
+            _text(cv, bkx, bky, f"A/C:  {bk.get('account', '')}",
+                  size=8, color=DARK_GREY)
+            bky -= 4 * mm
+            # label (GHS / USD)
+            if bk.get("label"):
+                _text(cv, bkx, bky, bk.get("label"),
+                      font="Helvetica-Bold", size=7.5, color=DARK_RED)
 
-    for i, bk in enumerate(left_banks[:2]):
-        _text(c, LM, sig_y - i * 4 * mm, bk.get("label", ""), size=8, color=MID_GREY)
-    for i, bk in enumerate(right_banks[:2]):
-        _text(c, mid + 5 * mm, sig_y - i * 4 * mm, bk.get("label", ""), size=8, color=MID_GREY)
+    # ── RIGHT — Signature block ───────────────────────────────────────────
+    sig_title = agency.get("signatory_title", "Reservations Manager")
+    sig_name  = agency.get("signatory_name", "")
 
-    return sig_y - 12 * mm
+    sig_left  = LM + CONTENT_W * 0.6
+    sig_right = RM
+    sig_cx    = (sig_left + sig_right) / 2
+
+    # "Authorised Signatory" label
+    sig_label_y = section_top - 5 * mm
+    _text(cv, sig_cx, sig_label_y, "Authorised Signatory",
+          font="Helvetica-Bold", size=8, color=DARK_GREY, align="center")
+
+    # signature space
+    sig_line_y = footer_top + 10 * mm
+    _line(cv, sig_left + 5 * mm, sig_line_y, sig_right - 5 * mm,
+          lw=0.8, color=DARK_GREY, dash=(3, 2))
+
+    # name + title below line
+    name_y = sig_line_y - 4.5 * mm
+    if sig_name:
+        _text(cv, sig_cx, name_y, sig_name,
+              font="Helvetica-Bold", size=9, color=BLACK, align="center")
+        name_y -= 4.5 * mm
+    _text(cv, sig_cx, name_y, sig_title,
+          font="Helvetica", size=8.5, color=MID_GREY, align="center")
+
+    # vertical divider between banking and signature
+    mid_x = LM + CONTENT_W * 0.55
+    cv.setStrokeColor(LIGHT_GREY)
+    cv.setLineWidth(0.5)
+    cv.line(mid_x, footer_top + 2 * mm, mid_x, section_top - 2 * mm)
 
 
-# ── Footer services bar ───────────────────────────────────────────────────────
-def _draw_footer(c, agency):
-    bar_h = 12 * mm
-    bar_y = 10 * mm
+# ── 6. Services footer ────────────────────────────────────────────────────────
+def _draw_footer(cv, agency):
+    bar_h = 11 * mm
+    bar_y = 8 * mm
 
-    c.setFillColor(colors.HexColor("#EEEEEE"))
-    c.setStrokeColor(LIGHT_GREY)
-    c.setLineWidth(0.5)
-    c.rect(LM, bar_y, CONTENT_W, bar_h, fill=1, stroke=1)
+    cv.setFillColor(colors.HexColor("#222222"))
+    cv.rect(LM, bar_y, CONTENT_W, bar_h, fill=1, stroke=0)
 
     services = agency.get("services", [
         "AIR TICKETS & RESERVATIONS",
@@ -485,18 +526,13 @@ def _draw_footer(c, agency):
         "TRAVEL INSURANCE",
     ])
 
-    # Lay out in up to 3 columns
     col_count = 3
     col_w = CONTENT_W / col_count
-    col_items = [[] for _ in range(col_count)]
-    for i, svc in enumerate(services):
-        col_items[i % col_count].append(svc)
-
-    for ci, col in enumerate(col_items):
-        cx = LM + ci * col_w + 4 * mm
-        for ri, svc in enumerate(col):
-            cy = bar_y + bar_h - 4 * mm - ri * 4 * mm
-            c.setFont("Helvetica", 7)
-            c.setFillColor(DARK_GREY)
-            c.drawString(cx, cy, f"- {svc}")
-
+    for i, svc in enumerate(services[:9]):
+        ci = i % col_count
+        ri = i // col_count
+        cx = LM + ci * col_w + 3 * mm
+        cy = bar_y + bar_h - 4 * mm - ri * 3.8 * mm
+        cv.setFont("Helvetica", 6.5)
+        cv.setFillColor(colors.white)
+        cv.drawString(cx, cy, f"✦  {svc}")

@@ -731,7 +731,7 @@ export default function VendorBills() {
                           {isOverdue && <span className="ml-1 text-xs text-red-500">Overdue</span>}
                         </td>
                         <td className="px-5 py-4 text-right font-semibold text-slate-700">{fmt(bill.amount)}</td>
-                        <td className="px-5 py-4 text-right -medium">{fmt(bill.amount_paid)}</td>
+                        <td className="px-5 py-4 text-right font-medium text-emerald-600">{fmt(bill.amount_paid)}</td>
                         <td className="px-5 py-4 text-right font-bold text-red-600">{fmt(bill.balance_due)}</td>
                         <td className="px-5 py-4">
                           <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium
