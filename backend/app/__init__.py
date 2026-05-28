@@ -355,6 +355,11 @@ def create_app(env: str = "development") -> "Flask":
     jwt.init_app(app)
     CORS(app, resources={r"/api/*": {"origins": "http://localhost:3000"}})
 
+    # ── Import all models so db.create_all() knows about every table ────────
+    from .models import (user, customer, booking, invoice, payment,       # noqa: F401
+                         vendor, vendor_bill, expense, accounting,
+                         audit, airline, trial_balance)
+
     # ── Create tables & run migrations ──────────────────────────────────────
     with app.app_context():
         db.create_all()
