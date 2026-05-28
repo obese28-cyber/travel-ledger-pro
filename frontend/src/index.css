@@ -1,0 +1,30 @@
+/* src/index.css — Global styles */
+
+/* Tailwind directives — these are replaced with real CSS at build time */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Custom base styles ──────────────────────────────────────────────────── */
+@layer base {
+  /* Smooth scrolling everywhere */
+  html { scroll-behavior: smooth; }
+
+  /* Prevent layout shift from scrollbar appearing/disappearing */
+  body { overflow-y: scroll; }
+
+  /* Input focus rings that match brand color */
+  input:focus,
+  select:focus,
+  textarea:focus {
+    outline: none;
+    box-shadow: 0 0 0 2px #6366f1;
+  }
+}
+
+/* ── Custom utility classes ──────────────────────────────────────────────── */
+@layer utilities {
+  /* Hide scrollbar visually but keep it functional */
+  .scrollbar-hide::-webkit-scrollbar { display: none; }
+  .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+}
