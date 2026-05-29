@@ -179,6 +179,10 @@ export default function Login() {
         <p className="text-center text-xs text-slate-500 mt-6">
           Travel Ledger Pro © {new Date().getFullYear()}
         </p>
+        <p className="text-center text-xs text-slate-400 mt-2">
+          Powered by{' '}
+          <span className="font-semibold text-slate-500">Orbitlinked Technology</span>
+        </p>
       </div>
     </div>
   )

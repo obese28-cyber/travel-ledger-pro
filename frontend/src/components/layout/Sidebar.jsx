@@ -93,6 +93,8 @@ export default function Sidebar({ isOpen, onClose }) {
         <div className="px-6 py-4 border-t border-slate-700/60">
           <p className="text-xs text-slate-500">Travel Ledger Pro</p>
           <p className="text-xs text-slate-600">v1.0</p>
+          <p className="text-xs text-slate-600 mt-2">Powered by</p>
+          <p className="text-xs font-semibold text-slate-400">Orbitlinked Technology</p>
         </div>
       </aside>
     </>
