@@ -261,16 +261,31 @@ def cancel_invoice(invoice_id: int):
 
 
 @invoices_bp.route("/<int:invoice_id>/pdf", methods=["GET", "OPTIONS"])
-@jwt_required(optional=True)
 def download_invoice_pdf(invoice_id: int):
     """
     Generate and return a PDF for this invoice.
-    GET /api/invoices/:id/pdf
+    GET /api/invoices/:id/pdf?token=<jwt>
     Returns: application/pdf
     """
     from flask import make_response, request as flask_request, current_app
+    from flask_jwt_extended import decode_token
     if flask_request.method == "OPTIONS":
         return {}, 200
+
+    # Accept token via query param (for direct browser window.open calls)
+    token = flask_request.args.get("token", "")
+    if token:
+        try:
+            decode_token(token)  # validate; raises if invalid/expired
+        except Exception:
+            return error("Invalid or expired token", 401)
+    else:
+        # Fall back to header-based auth
+        from flask_jwt_extended import verify_jwt_in_request
+        try:
+            verify_jwt_in_request()
+        except Exception:
+            return error("Authentication required", 401)
 
     try:
         invoice = Invoice.query.get(invoice_id)
