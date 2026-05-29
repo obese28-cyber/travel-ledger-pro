@@ -38,14 +38,7 @@ reports_bp = Blueprint("reports", __name__)
 # ─────────────────────────────────────────────
 
 def _month_label(col):
-    try:
-        dialect = db.engine.dialect.name
-    except Exception:
-        dialect = "postgresql"
-
-    if dialect == "sqlite":
-        return func.strftime("%Y-%m", col)
-    return func.to_char(col, "YYYY-MM")
+    return func.date_trunc(text("'month'"), col)
 
 
 def _parse_dates():
@@ -66,8 +59,8 @@ def _parse_dates():
 @jwt_required()
 def dashboard():
     today = date.today()
-    date_from = request.args.get("date_from", today.replace(month=1, day=1).isoformat())
-    date_to   = request.args.get("date_to", today.isoformat())
+    date_from = date.fromisoformat(request.args.get("date_from", date.today().replace(month=1, day=1).isoformat()))
+    date_to   = date.fromisoformat(request.args.get("date_to", date.today().isoformat()))
 
     revenue = db.session.query(func.sum(Invoice.total_amount)).filter(
         Invoice.issue_date >= date_from,
