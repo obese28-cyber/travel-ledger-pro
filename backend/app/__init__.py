@@ -144,6 +144,15 @@ def create_app(env: str = "development"):
     _run_migrations(app)
 
     # -----------------------------
+    # AGENCY PROFILE
+    # -----------------------------
+    try:
+        from agency_profile import AGENCY_PROFILE
+        app.config["AGENCY_PROFILE"] = AGENCY_PROFILE
+    except Exception as e:
+        print("[warn] agency_profile.py not loaded:", str(e))
+
+    # -----------------------------
     # BLUEPRINTS
     # -----------------------------
     from .routes.auth import auth_bp
