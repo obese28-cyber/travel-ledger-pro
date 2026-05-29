@@ -49,14 +49,13 @@ export default function Login() {
         <div className="text-center mb-8">
           <div className="inline-flex items-center justify-center mb-4">
             <img
-              src="https://app.orbitlinked.com/api/admin/logo"
+              src="/logo.jpg"
               alt="Orbitlinked Technology"
               className="h-20 object-contain drop-shadow-lg"
               onError={e => { e.target.style.display = 'none' }}
             />
           </div>
-          <h1 className="text-2xl font-bold text-white">Orbitlinked Technology</h1>
-          <p className="text-slate-400 text-sm mt-1">Travel Ledger Pro — Sign in to your account</p>
+          <p className="text-slate-400 text-sm mt-1">Sign in to your account</p>
         </div>
 
         {/* ── Login card ────────────────────────────────────────────────── */}
