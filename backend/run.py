@@ -92,6 +92,78 @@ def _seed_admin():
 _seed_admin()
 
 
+def _seed_coa():
+    """
+    Seed the chart of accounts if the table is empty.
+    SAFE: wrapped to avoid Render crash.
+    """
+    try:
+        with app.app_context():
+            from app.models.accounting import ChartOfAccount
+            from app.extensions import db
+
+            if ChartOfAccount.query.first():
+                return  # already seeded
+
+            accounts = [
+                # code,   name,                              type,        description
+                ("1000", "Cash on Hand",                    "asset",     "Physical cash in the office"),
+                ("1010", "Bank Account — Main",              "asset",     "Primary business bank account"),
+                ("1020", "Bank Account — USD",               "asset",     "USD foreign currency account"),
+                ("1100", "Accounts Receivable",              "asset",     "Money owed by customers"),
+                ("2000", "Accounts Payable — Vendors",       "liability", "Money owed to suppliers"),
+                ("2100", "Tax Payable",                      "liability", "VAT or tax owed to government"),
+                ("3000", "Owner's Equity",                   "equity",    "Owner's investment in the business"),
+                ("3100", "Retained Earnings",                "equity",    "Accumulated profits"),
+                ("4000", "Sales Revenue — Travel Services",  "revenue",   "Income from bookings"),
+                ("4100", "Commission Income",                "revenue",   "Commission from partners"),
+                ("5000", "Cost of Sales — Airline Tickets",  "expense",   "Airline ticket costs"),
+                ("5010", "Cost of Sales — Hotel",            "expense",   "Hotel accommodation costs"),
+                ("5020", "Cost of Sales — Visa Services",    "expense",   "Visa processing costs"),
+                ("5030", "Cost of Sales — Tour Packages",    "expense",   "Tour operator costs"),
+                ("5040", "Cost of Sales — Insurance",        "expense",   "Travel insurance costs"),
+                ("6000", "Operating Expenses",               "expense",   "Parent: all operating costs"),
+                ("6100", "Staff Salaries",                   "expense",   "Monthly staff wages"),
+                ("6200", "Office Rent",                      "expense",   "Monthly office rent"),
+                ("6300", "Fuel & Transport",                 "expense",   "Vehicle and transport costs"),
+                ("6400", "Marketing & Advertising",          "expense",   "Ads, promotions, marketing"),
+                ("6500", "Utilities",                        "expense",   "Electricity, internet, water"),
+                ("6900", "Miscellaneous Expenses",           "expense",   "Other operating expenses"),
+            ]
+
+            parent_6000_id = None
+            for code, name, acct_type, desc in accounts:
+                if ChartOfAccount.query.filter_by(account_code=code).first():
+                    continue
+                acct = ChartOfAccount(
+                    account_code=code,
+                    account_name=name,
+                    account_type=acct_type,
+                    description=desc,
+                    is_active=True,
+                )
+                db.session.add(acct)
+                db.session.flush()
+                if code == "6000":
+                    parent_6000_id = acct.id
+
+            if parent_6000_id:
+                db.session.flush()
+                for code in ["6100", "6200", "6300", "6400", "6500", "6900"]:
+                    acct = ChartOfAccount.query.filter_by(account_code=code).first()
+                    if acct and acct.parent_id is None:
+                        acct.parent_id = parent_6000_id
+
+            db.session.commit()
+            print("[init] Chart of accounts seeded (22 accounts)")
+
+    except Exception as e:
+        print("[WARN] COA seed skipped:", str(e))
+
+
+_seed_coa()
+
+
 def _ensure_tables():
     """
     Prevent Render crash: auto-create missing DB tables.
