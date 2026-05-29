@@ -15,7 +15,7 @@ from datetime import date
 import calendar
 from flask import Blueprint, request
 from flask_jwt_extended import jwt_required
-from sqlalchemy import func
+from sqlalchemy import func, text
 
 from ..extensions import db
 from ..utils.responses import success, error
@@ -44,11 +44,12 @@ def _month_label(col):
 def _parse_dates():
     today = date.today()
     first_day = today.replace(day=1)
-
-    return (
-        request.args.get("date_from", first_day.isoformat()),
-        request.args.get("date_to", today.isoformat())
-    )
+    df = request.args.get("date_from", first_day.isoformat())
+    dt = request.args.get("date_to", today.isoformat())
+    try:
+        return date.fromisoformat(df), date.fromisoformat(dt)
+    except Exception:
+        return first_day, today
 
 
 # ─────────────────────────────────────────────
@@ -123,36 +124,42 @@ def sparklines():
             y -= 1
         months.append(f"{y:04d}-{m:02d}")
 
-    start = months[0] + "-01"
-    end = today.isoformat()
+    month_start = date.fromisoformat(months[0] + "-01")
+    month_end   = today
+
+    def to_str(val):
+        return str(val)[:7] if val else ""
 
     rev = db.session.query(
-        _month_label(Invoice.issue_date),
-        func.sum(Invoice.total_amount)
+        _month_label(Invoice.issue_date).label("m"),
+        func.sum(Invoice.total_amount).label("t")
     ).filter(
-        Invoice.issue_date >= start,
-        Invoice.issue_date <= end,
+        Invoice.issue_date >= month_start,
+        Invoice.issue_date <= month_end,
+        Invoice.status != "cancelled",
     ).group_by(_month_label(Invoice.issue_date)).all()
-
-    rev_map = {m: float(v or 0) for m, v in rev}
+    rev_map = {to_str(r.m): float(r.t or 0) for r in rev}
 
     exp = db.session.query(
-        _month_label(Expense.expense_date),
-        func.sum(Expense.amount)
+        _month_label(Expense.expense_date).label("m"),
+        func.sum(Expense.amount).label("t")
     ).filter(
-        Expense.expense_date >= start,
-        Expense.expense_date <= end,
+        Expense.expense_date >= month_start,
+        Expense.expense_date <= month_end,
     ).group_by(_month_label(Expense.expense_date)).all()
+    exp_map = {to_str(r.m): float(r.t or 0) for r in exp}
 
-    exp_map = {m: float(v or 0) for m, v in exp}
-
-    revenue = [rev_map.get(m, 0) for m in months]
+    revenue  = [rev_map.get(m, 0) for m in months]
     expenses = [exp_map.get(m, 0) for m in months]
-    net = [r - e for r, e in zip(revenue, expenses)]
+    net      = [round(r - e, 2) for r, e in zip(revenue, expenses)]
 
     return success({
-        "months": months,
-        "revenue": revenue,
-        "expenses": expenses,
-        "net_profit": net
+        "months":       months,
+        "revenue":      revenue,
+        "expenses":     expenses,
+        "gross_profit": net,
+        "net_profit":   net,
+        "receivables":  revenue,
+        "payables":     [0] * 6,
+        "cogs":         [0] * 6,
     })
