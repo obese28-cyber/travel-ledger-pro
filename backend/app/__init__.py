@@ -174,4 +174,9 @@ def create_app(env: str = "development"):
     app.register_blueprint(airlines_bp, url_prefix="/api/airlines")
     app.register_blueprint(admin_bp, url_prefix="/api/admin")
 
+    @app.route("/")
+    @app.route("/api/health")
+    def health():
+        return {"status": "ok", "db": db.engine.dialect.name}
+
     return app

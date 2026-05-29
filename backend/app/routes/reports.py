@@ -20,12 +20,14 @@ from ..extensions import db
 
 
 def _month_label(col):
-    """Return a SQL expression for YYYY-MM grouping, compatible with SQLite and PostgreSQL."""
-    import os
-    db_url = os.environ.get("DATABASE_URL", "")
-    if "postgres" in db_url:
-        return func.to_char(col, "YYYY-MM")
-    return func.strftime("%Y-%m", col)
+    """Return a SQL expression for YYYY-MM grouping — always uses to_char (PostgreSQL)."""
+    try:
+        dialect = db.engine.dialect.name
+    except Exception:
+        dialect = "postgresql"
+    if dialect == "sqlite":
+        return func.strftime("%Y-%m", col)
+    return func.to_char(col, "YYYY-MM")
 from ..models.invoice import Invoice
 from ..models.payment import Payment
 from ..models.vendor_bill import VendorBill, VendorPayment
