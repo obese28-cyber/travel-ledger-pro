@@ -17,14 +17,6 @@ from ..extensions import db as _ext_db
 
 
 def _month_label(col):
-    """Return a SQL expression for YYYY-MM grouping — always uses to_char (PostgreSQL)."""
-    from ..extensions import db
-    try:
-        dialect = db.engine.dialect.name
-    except Exception:
-        dialect = "postgresql"
-    if dialect == "sqlite":
-        return func.strftime("%Y-%m", col)
     return func.to_char(col, "YYYY-MM")
 from ..extensions import db
 from ..models.expense import Expense, EXPENSE_CATEGORIES, CATEGORY_ACCOUNT_MAP, CATEGORY_LABEL_MAP

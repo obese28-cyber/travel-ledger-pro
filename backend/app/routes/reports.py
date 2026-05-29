@@ -13,21 +13,17 @@ All report endpoints accept optional query params:
 """
 
 from datetime import date, timedelta
+from sqlalchemy import cast, Date as SADate
 from flask import Blueprint, request
 from flask_jwt_extended import jwt_required, get_jwt_identity
-from sqlalchemy import func, and_, text
+from sqlalchemy import func, and_, text, literal
 from ..extensions import db
 
 
 def _month_label(col):
-    """Return a SQL expression for YYYY-MM grouping — always uses to_char (PostgreSQL)."""
-    try:
-        dialect = db.engine.dialect.name
-    except Exception:
-        dialect = "postgresql"
-    if dialect == "sqlite":
-        return func.strftime("%Y-%m", col)
-    return func.to_char(col, "YYYY-MM")
+    return func.date_trunc(text("'month'"), col)
+
+
 from ..models.invoice import Invoice
 from ..models.payment import Payment
 from ..models.vendor_bill import VendorBill, VendorPayment
@@ -43,17 +39,15 @@ reports_bp = Blueprint("reports", __name__)
 
 
 def _parse_dates():
-    """Parse date_from and date_to from query params. Default to current month."""
-    today      = date.today()
-    first_day  = today.replace(day=1)
-    date_from  = request.args.get("date_from", first_day.isoformat())
-    date_to    = request.args.get("date_to",   today.isoformat())
+    from datetime import datetime as _dt
+    today     = date.today()
+    first_day = today.replace(day=1)
+    df = request.args.get("date_from", first_day.isoformat())
+    dt = request.args.get("date_to",   today.isoformat())
     try:
-        return date_from, date_to
+        return _dt.strptime(df, "%Y-%m-%d").date(), _dt.strptime(dt, "%Y-%m-%d").date()
     except Exception:
-        return first_day.isoformat(), today.isoformat()
-
-
+        return first_day, today
 def _account_balance(account_code: str, date_from: str, date_to: str) -> float:
     """
     Sum all journal entry line movements for a given account code within a date range.
@@ -112,9 +106,9 @@ def dashboard():
     today     = date.today()
     # Dashboard defaults to year-to-date so all entries in the current year appear.
     # Callers can override via ?date_from=YYYY-MM-DD&date_to=YYYY-MM-DD
-    ytd_start = today.replace(month=1, day=1).isoformat()
-    date_from = request.args.get("date_from", ytd_start)
-    date_to   = request.args.get("date_to",   today.isoformat())
+    ytd_start = today.replace(month=1, day=1)
+    date_from = date.fromisoformat(request.args.get("date_from", ytd_start.isoformat()))
+    date_to   = date.fromisoformat(request.args.get("date_to",   today.isoformat()))
 
     # Revenue: sum invoice totals by issue_date (accrual basis — revenue recognised
     # when invoice is raised, not when cash is received).
@@ -794,8 +788,8 @@ def sparklines():
             y -= 1
         months.append(f"{y:04d}-{m:02d}")
 
-    month_start = months[0] + "-01"   # first day of oldest month
-    month_end   = today.isoformat()   # today
+    month_start = date.fromisoformat(months[0] + "-01")  # first day of oldest month
+    month_end   = today  # today
 
     # ── Revenue: sum invoice totals by issue_date (accrual basis) ────────
     # Revenue is recognised when invoice is raised, not when cash is received.
@@ -812,7 +806,7 @@ def sparklines():
         .group_by(_month_label(Invoice.issue_date))
         .all()
     )
-    rev_map = {r.month: round(r.total or 0, 2) for r in rev_rows}
+    rev_map = {r.month.strftime('%Y-%m') if hasattr(r.month,'strftime') else str(r.month)[:7]: round(r.total or 0, 2) for r in rev_rows}
 
     # ── Operating expenses per month ─────────────────────────────────────
     exp_rows = (
@@ -827,7 +821,7 @@ def sparklines():
         .group_by(_month_label(Expense.expense_date))
         .all()
     )
-    exp_map = {r.month: round(r.total or 0, 2) for r in exp_rows}
+    exp_map = {r.month.strftime('%Y-%m') if hasattr(r.month,'strftime') else str(r.month)[:7]: round(r.total or 0, 2) for r in exp_rows}
 
     # ── COGS: BookingItem vendor_cost by invoice issue_date (accrual basis) ─
     cogs_rows = (
@@ -845,7 +839,7 @@ def sparklines():
         .group_by(_month_label(Invoice.issue_date))
         .all()
     )
-    cogs_map = {r.month: round(r.total or 0, 2) for r in cogs_rows}
+    cogs_map = {r.month.strftime('%Y-%m') if hasattr(r.month,'strftime') else str(r.month)[:7]: round(r.total or 0, 2) for r in cogs_rows}
 
     # ── Gross profit: (Revenue - COGS) per invoice month (accrual basis) ───
     gp_rows = (
@@ -863,7 +857,7 @@ def sparklines():
         .group_by(_month_label(Invoice.issue_date))
         .all()
     )
-    gp_map = {r.month: round(r.total or 0, 2) for r in gp_rows}
+    gp_map = {r.month.strftime('%Y-%m') if hasattr(r.month,'strftime') else str(r.month)[:7]: round(r.total or 0, 2) for r in gp_rows}
 
     # ── Receivables: invoice total_amount issued per month ───────────────
     rec_rows = (
@@ -878,7 +872,7 @@ def sparklines():
         .group_by(_month_label(Invoice.issue_date))
         .all()
     )
-    rec_map = {r.month: round(r.total or 0, 2) for r in rec_rows}
+    rec_map = {r.month.strftime('%Y-%m') if hasattr(r.month,'strftime') else str(r.month)[:7]: round(r.total or 0, 2) for r in rec_rows}
 
     # ── Payables: vendor bills raised per month ───────────────────────────
     pay_rows = (
@@ -893,7 +887,7 @@ def sparklines():
         .group_by(_month_label(VendorBill.bill_date))
         .all()
     )
-    pay_map = {r.month: round(r.total or 0, 2) for r in pay_rows}
+    pay_map = {r.month.strftime('%Y-%m') if hasattr(r.month,'strftime') else str(r.month)[:7]: round(r.total or 0, 2) for r in pay_rows}
 
     revenue      = [rev_map.get(m, 0.0)  for m in months]
     cogs         = [cogs_map.get(m, 0.0) for m in months]
