@@ -349,12 +349,14 @@ export default function NewBooking() {
           </p>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div className="mb-4">
           <FormInput
             label="Destination" name="destination" value={values.destination}
             onChange={onChange} placeholder="e.g. Dubai, UAE"
             required error={errs.destination}
           />
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <FormInput
             label="Travel Date" name="travel_date" type="date" value={values.travel_date}
             onChange={onChange} required error={errs.travel_date}
