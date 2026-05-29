@@ -54,14 +54,15 @@ export default function Sidebar({ isOpen, onClose }) {
         aria-label="Sidebar navigation"
       >
         <div className="flex items-center gap-3 px-6 py-5 border-b border-slate-700/60">
-          <div className="flex items-center justify-center w-9 h-9 rounded-lg bg-indigo-600 shrink-0">
-            <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
-            </svg>
-          </div>
+          <img
+            src="https://app.orbitlinked.com/api/admin/logo"
+            alt="Orbitlinked Technology"
+            className="h-10 object-contain"
+            onError={e => { e.target.style.display = 'none' }}
+          />
           <div>
-            <p className="text-sm font-semibold leading-tight">Travel Ledger</p>
-            <p className="text-xs text-slate-400 leading-tight">Pro</p>
+            <p className="text-sm font-semibold leading-tight">Orbitlinked</p>
+            <p className="text-xs text-slate-400 leading-tight">Travel Ledger Pro</p>
           </div>
         </div>
 

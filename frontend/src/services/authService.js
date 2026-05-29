@@ -1,27 +1,35 @@
-/**
- * services/authService.js — Authentication API calls.
- */
+login: async (email, password) => {
+  const res = await client.post('/auth/login', { email, password })
 
-import client from '../api/client'
+  console.log("FULL LOGIN RESPONSE:", res.data)
 
-export const authService = {
-  /** POST /api/auth/login — returns { token, user } */
-  login: async (email, password) => {
-    const res = await client.post('/auth/login', { email, password })
-    return res.data.data // { token, user }
-  },
+  // 🔍 try all common backend response shapes safely
+  const data = res.data
 
-  /** POST /api/auth/logout */
-  logout: async () => {
-    await client.post('/auth/logout').catch(() => {})
-    // Always clear local storage, even if the request fails
-    localStorage.removeItem('tlp_token')
-    localStorage.removeItem('tlp_user')
-  },
+  const token =
+    data?.token ||
+    data?.access_token ||
+    data?.data?.token ||
+    data?.data?.access_token
 
-  /** GET /api/auth/me */
-  getCurrentUser: async () => {
-    const res = await client.get('/auth/me')
-    return res.data.data
-  },
+  const user =
+    data?.user ||
+    data?.data?.user ||
+    null
+
+  if (!token) {
+    console.error("❌ No token found in login response", data)
+    return data
+  }
+
+  // ✅ SAVE TO LOCAL STORAGE
+  localStorage.setItem('tlp_token', token)
+
+  if (user) {
+    localStorage.setItem('tlp_user', JSON.stringify(user))
+  }
+
+  console.log("✅ Token saved:", token)
+
+  return { token, user }
 }
