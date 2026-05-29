@@ -41,7 +41,13 @@ class BaseConfig:
 
     # ── Database ────────────────────────────────────────────────────────────
     SQLALCHEMY_TRACK_MODIFICATIONS = False           # suppress deprecation warning
-    SQLALCHEMY_DATABASE_URI = os.getenv("DATABASE_URL", _DEFAULT_DB)
+    # Convert postgres:// or postgresql:// → postgresql+psycopg:// for psycopg3
+    _raw_db_url = os.getenv("DATABASE_URL", _DEFAULT_DB)
+    if _raw_db_url.startswith("postgres://"):
+        _raw_db_url = _raw_db_url.replace("postgres://", "postgresql+psycopg://", 1)
+    elif _raw_db_url.startswith("postgresql://"):
+        _raw_db_url = _raw_db_url.replace("postgresql://", "postgresql+psycopg://", 1)
+    SQLALCHEMY_DATABASE_URI = _raw_db_url
     # PostgreSQL upgrade tip:
     # Set DATABASE_URL=postgresql://user:pass@host:5432/dbname in your .env
 
