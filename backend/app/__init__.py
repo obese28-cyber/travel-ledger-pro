@@ -115,14 +115,9 @@ def create_app(env: str = "development"):
     db.init_app(app)
     jwt.init_app(app)
 
-    # CORS — allow local dev + Cloudflare Pages production
-    default_origins = ",".join([
-        "http://localhost:3000",
-        "http://localhost:5173",
-        "https://travel-ledger-pro.pages.dev",
-    ])
-    allowed_origins = os.environ.get("CORS_ORIGINS", default_origins).split(",")
-    CORS(app, resources={r"/api/*": {"origins": allowed_origins}})
+    # CORS — allow all origins (restricted by CORSMiddleware in run.py)
+    CORS(app, resources={r"/api/*": {"origins": "*"}},
+         supports_credentials=False)
 
     # Import models
     from .models import (
