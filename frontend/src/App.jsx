@@ -1,4 +1,3 @@
-import logo from "./assets/logo.jpg";
 /**
  * App.jsx -- Root component. Sets up routing, auth context, and toast provider.
  */
