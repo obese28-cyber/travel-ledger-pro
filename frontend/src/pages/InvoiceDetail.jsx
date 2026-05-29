@@ -67,8 +67,9 @@ export default function InvoiceDetail() {
   function handleDownloadPdf() {
     // Open PDF directly in a new tab using token as query param.
     // This avoids IDM / download-manager extensions intercepting XHR blob requests.
-    const token = localStorage.getItem('tlp_token') || ''
-    const url   = `http://localhost:5000/api/invoices/${id}/pdf?token=${encodeURIComponent(token)}`
+    const token   = localStorage.getItem('tlp_token') || ''
+    const baseURL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api'
+    const url     = `${baseURL}/invoices/${id}/pdf?token=${encodeURIComponent(token)}`
     window.open(url, '_blank')
   }
 
