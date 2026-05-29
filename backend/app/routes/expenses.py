@@ -18,9 +18,9 @@ from ..extensions import db as _ext_db
 
 def _month_label(col):
     """Return a SQL expression for YYYY-MM grouping, compatible with SQLite and PostgreSQL."""
-    from ..extensions import db
-    dialect = db.engine.dialect.name
-    if dialect == "postgresql":
+    import os
+    db_url = os.environ.get("DATABASE_URL", "")
+    if "postgres" in db_url:
         return func.to_char(col, "YYYY-MM")
     return func.strftime("%Y-%m", col)
 from ..extensions import db
