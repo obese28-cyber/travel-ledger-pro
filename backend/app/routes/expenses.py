@@ -13,6 +13,16 @@ from datetime import date, datetime, timezone
 from flask import Blueprint, request
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from sqlalchemy import func
+from ..extensions import db as _ext_db
+
+
+def _month_label(col):
+    """Return a SQL expression for YYYY-MM grouping, compatible with SQLite and PostgreSQL."""
+    from ..extensions import db
+    dialect = db.engine.dialect.name
+    if dialect == "postgresql":
+        return func.to_char(col, "YYYY-MM")
+    return func.strftime("%Y-%m", col)
 from ..extensions import db
 from ..models.expense import Expense, EXPENSE_CATEGORIES, CATEGORY_ACCOUNT_MAP, CATEGORY_LABEL_MAP
 from ..models.accounting import ChartOfAccount
@@ -113,11 +123,11 @@ def summary():
 
     # Monthly totals (last 6 months)
     monthly_rows = db.session.query(
-        func.strftime("%Y-%m", Expense.expense_date).label("month"),
+        _month_label(Expense.expense_date).label("month"),
         func.sum(Expense.amount).label("total"),
         func.count(Expense.id).label("count"),
-    ).group_by(func.strftime("%Y-%m", Expense.expense_date)).order_by(
-        func.strftime("%Y-%m", Expense.expense_date).desc()
+    ).group_by(_month_label(Expense.expense_date)).order_by(
+        _month_label(Expense.expense_date).desc()
     ).limit(6).all()
     monthly = [
         {"month": r.month, "total": round(r.total, 2), "count": r.count}
@@ -328,15 +338,15 @@ def category_ledger(category_key: str):
 
     # Monthly breakdown
     monthly_rows = db.session.query(
-        func.strftime("%Y-%m", Expense.expense_date).label("month"),
+        _month_label(Expense.expense_date).label("month"),
         func.sum(Expense.amount).label("total"),
         func.count(Expense.id).label("count"),
     ).filter(
         Expense.category     == category_key,
         Expense.expense_date >= date_from,
         Expense.expense_date <= date_to,
-    ).group_by(func.strftime("%Y-%m", Expense.expense_date)).order_by(
-        func.strftime("%Y-%m", Expense.expense_date)
+    ).group_by(_month_label(Expense.expense_date)).order_by(
+        _month_label(Expense.expense_date)
     ).all()
     monthly = [
         {"month": r.month, "total": round(r.total, 2), "count": r.count}

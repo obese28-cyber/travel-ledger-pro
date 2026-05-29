@@ -15,8 +15,16 @@ All report endpoints accept optional query params:
 from datetime import date, timedelta
 from flask import Blueprint, request
 from flask_jwt_extended import jwt_required, get_jwt_identity
-from sqlalchemy import func, and_
+from sqlalchemy import func, and_, text
 from ..extensions import db
+
+
+def _month_label(col):
+    """Return a SQL expression for YYYY-MM grouping, compatible with SQLite and PostgreSQL."""
+    dialect = db.engine.dialect.name
+    if dialect == "postgresql":
+        return func.to_char(col, "YYYY-MM")
+    return func.strftime("%Y-%m", col)
 from ..models.invoice import Invoice
 from ..models.payment import Payment
 from ..models.vendor_bill import VendorBill, VendorPayment
@@ -790,7 +798,7 @@ def sparklines():
     # Revenue is recognised when invoice is raised, not when cash is received.
     rev_rows = (
         db.session.query(
-            func.strftime("%Y-%m", Invoice.issue_date).label("month"),
+            _month_label(Invoice.issue_date).label("month"),
             func.sum(Invoice.total_amount).label("total"),
         )
         .filter(
@@ -798,7 +806,7 @@ def sparklines():
             Invoice.issue_date <= month_end,
             Invoice.status != "cancelled",
         )
-        .group_by(func.strftime("%Y-%m", Invoice.issue_date))
+        .group_by(_month_label(Invoice.issue_date))
         .all()
     )
     rev_map = {r.month: round(r.total or 0, 2) for r in rev_rows}
@@ -806,14 +814,14 @@ def sparklines():
     # ── Operating expenses per month ─────────────────────────────────────
     exp_rows = (
         db.session.query(
-            func.strftime("%Y-%m", Expense.expense_date).label("month"),
+            _month_label(Expense.expense_date).label("month"),
             func.sum(Expense.amount).label("total"),
         )
         .filter(
             Expense.expense_date >= month_start,
             Expense.expense_date <= month_end,
         )
-        .group_by(func.strftime("%Y-%m", Expense.expense_date))
+        .group_by(_month_label(Expense.expense_date))
         .all()
     )
     exp_map = {r.month: round(r.total or 0, 2) for r in exp_rows}
@@ -821,7 +829,7 @@ def sparklines():
     # ── COGS: BookingItem vendor_cost by invoice issue_date (accrual basis) ─
     cogs_rows = (
         db.session.query(
-            func.strftime("%Y-%m", Invoice.issue_date).label("month"),
+            _month_label(Invoice.issue_date).label("month"),
             func.sum(BookingItem.vendor_cost).label("total"),
         )
         .join(Booking,  Booking.id         == BookingItem.booking_id)
@@ -831,7 +839,7 @@ def sparklines():
             Invoice.issue_date <= month_end,
             Invoice.status     != "cancelled",
         )
-        .group_by(func.strftime("%Y-%m", Invoice.issue_date))
+        .group_by(_month_label(Invoice.issue_date))
         .all()
     )
     cogs_map = {r.month: round(r.total or 0, 2) for r in cogs_rows}
@@ -839,7 +847,7 @@ def sparklines():
     # ── Gross profit: (Revenue - COGS) per invoice month (accrual basis) ───
     gp_rows = (
         db.session.query(
-            func.strftime("%Y-%m", Invoice.issue_date).label("month"),
+            _month_label(Invoice.issue_date).label("month"),
             func.sum(BookingItem.selling_price - BookingItem.vendor_cost).label("total"),
         )
         .join(Booking,  Booking.id         == BookingItem.booking_id)
@@ -849,7 +857,7 @@ def sparklines():
             Invoice.issue_date <= month_end,
             Invoice.status     != "cancelled",
         )
-        .group_by(func.strftime("%Y-%m", Invoice.issue_date))
+        .group_by(_month_label(Invoice.issue_date))
         .all()
     )
     gp_map = {r.month: round(r.total or 0, 2) for r in gp_rows}
@@ -857,14 +865,14 @@ def sparklines():
     # ── Receivables: invoice total_amount issued per month ───────────────
     rec_rows = (
         db.session.query(
-            func.strftime("%Y-%m", Invoice.issue_date).label("month"),
+            _month_label(Invoice.issue_date).label("month"),
             func.sum(Invoice.total_amount).label("total"),
         )
         .filter(
             Invoice.issue_date >= month_start,
             Invoice.issue_date <= month_end,
         )
-        .group_by(func.strftime("%Y-%m", Invoice.issue_date))
+        .group_by(_month_label(Invoice.issue_date))
         .all()
     )
     rec_map = {r.month: round(r.total or 0, 2) for r in rec_rows}
@@ -872,14 +880,14 @@ def sparklines():
     # ── Payables: vendor bills raised per month ───────────────────────────
     pay_rows = (
         db.session.query(
-            func.strftime("%Y-%m", VendorBill.bill_date).label("month"),
+            _month_label(VendorBill.bill_date).label("month"),
             func.sum(VendorBill.amount).label("total"),
         )
         .filter(
             VendorBill.bill_date >= month_start,
             VendorBill.bill_date <= month_end,
         )
-        .group_by(func.strftime("%Y-%m", VendorBill.bill_date))
+        .group_by(_month_label(VendorBill.bill_date))
         .all()
     )
     pay_map = {r.month: round(r.total or 0, 2) for r in pay_rows}
