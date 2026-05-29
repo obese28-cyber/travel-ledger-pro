@@ -1,35 +1,34 @@
-login: async (email, password) => {
-  const res = await client.post('/auth/login', { email, password })
+import client from '../api/client'
 
-  console.log("FULL LOGIN RESPONSE:", res.data)
+const authService = {
+  login: async (email, password) => {
+    const res = await client.post('/auth/login', { email, password })
+    const data = res.data?.data || res.data
+    const token = data?.token || data?.access_token
+    const user  = data?.user || null
 
-  // 🔍 try all common backend response shapes safely
-  const data = res.data
+    if (!token) throw new Error('Login failed: no token returned')
 
-  const token =
-    data?.token ||
-    data?.access_token ||
-    data?.data?.token ||
-    data?.data?.access_token
-
-  const user =
-    data?.user ||
-    data?.data?.user ||
-    null
-
-  if (!token) {
-    console.error("❌ No token found in login response", data)
-    return data
-  }
-
-  // ✅ SAVE TO LOCAL STORAGE
-  localStorage.setItem('tlp_token', token)
-
-  if (user) {
+    localStorage.setItem('tlp_token', token)
     localStorage.setItem('tlp_user', JSON.stringify(user))
-  }
 
-  console.log("✅ Token saved:", token)
+    return { token, user }
+  },
 
-  return { token, user }
+  logout: () => {
+    localStorage.removeItem('tlp_token')
+    localStorage.removeItem('tlp_user')
+  },
+
+  getToken: () => localStorage.getItem('tlp_token'),
+
+  getUser: () => {
+    try {
+      return JSON.parse(localStorage.getItem('tlp_user'))
+    } catch {
+      return null
+    }
+  },
 }
+
+export default authService

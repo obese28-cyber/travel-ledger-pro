@@ -4,7 +4,7 @@ import axios from 'axios'
  * Axios instance for all API calls
  */
 const client = axios.create({
-  baseURL: 'https://travel-ledger-pro.onrender.com/api',
+  baseURL: import.meta.env.VITE_API_URL || 'http://localhost:5000/api',
   headers: {
     'Content-Type': 'application/json',
   },
