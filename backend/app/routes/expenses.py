@@ -71,8 +71,8 @@ def summary():
     """
     today     = date.today()
     first_day = today.replace(day=1)
-    date_from = request.args.get("date_from", first_day.isoformat())
-    date_to   = request.args.get("date_to",   today.isoformat())
+    date_from = __import__('datetime').date.fromisoformat(request.args.get("date_from", first_day.isoformat() or __import__('datetime').date.today().replace(day=1).isoformat()))
+    date_to = __import__('datetime').date.fromisoformat(request.args.get("date_to",   today.isoformat() or __import__('datetime').date.today().isoformat()))
 
     # Total in period
     total = db.session.query(func.sum(Expense.amount)).filter(
@@ -164,8 +164,8 @@ def list_expenses():
     """
     today     = date.today()
     first_day = today.replace(day=1)
-    date_from = request.args.get("date_from", first_day.isoformat())
-    date_to   = request.args.get("date_to",   today.isoformat())
+    date_from = __import__('datetime').date.fromisoformat(request.args.get("date_from", first_day.isoformat() or __import__('datetime').date.today().replace(day=1).isoformat()))
+    date_to = __import__('datetime').date.fromisoformat(request.args.get("date_to",   today.isoformat() or __import__('datetime').date.today().isoformat()))
     category  = request.args.get("category",  "").strip()
     method    = request.args.get("payment_method", "").strip()
     search    = request.args.get("search",    "").strip()
@@ -310,8 +310,8 @@ def category_ledger(category_key: str):
     if category_key not in VALID_CATEGORIES:
         return not_found("Category")
 
-    date_from = request.args.get("date_from", "2000-01-01")
-    date_to   = request.args.get("date_to",   date.today().isoformat())
+    date_from = __import__('datetime').date.fromisoformat(request.args.get("date_from", "2000-01-01") or __import__('datetime').date.today().replace(day=1).isoformat())
+    date_to = __import__('datetime').date.fromisoformat(request.args.get("date_to",   date.today() or __import__('datetime').date.today().isoformat()).isoformat())
 
     expenses = Expense.query.filter(
         Expense.category     == category_key,
