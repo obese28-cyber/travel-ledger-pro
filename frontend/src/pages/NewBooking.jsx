@@ -300,40 +300,36 @@ export default function NewBooking() {
     } finally { setSaving(false) }
   }
 
-  // ── Shared header section (company chosen ONCE here) ─────────────────────
-  function HeaderFields({ values, errs, onChange }) {
-    return (
+  // ── Shared header section — rendered as JSX, not a sub-component ──────────
+  const headerFields = (
       <div className="space-y-4">
         <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
           Company &amp; Supplier
         </p>
-
-        {/* Company — full width, prominent, chosen once */}
         <div className="p-4 bg-indigo-50 border border-indigo-100 rounded-xl">
           <p className="text-xs font-semibold text-indigo-600 uppercase tracking-wider mb-3">
             🏢 Company — applies to all passengers
           </p>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <FormSelect
-              label="Company" name="customer_id" value={values.customer_id}
-              onChange={onChange} options={customers}
+              label="Company" name="customer_id" value={mode === 'single' ? form.customer_id : hdr.customer_id}
+              onChange={mode === 'single' ? handleChange : onHdrChange} options={customers}
               placeholder={loadingDeps ? 'Loading…' : 'Select company…'}
-              required error={errs.customer_id} disabled={loadingDeps}
+              required error={mode === 'single' ? errors.customer_id : hdrErrs.customer_id} disabled={loadingDeps}
             />
             <FormSelect
-              label="Supplier / Vendor" name="vendor_id" value={values.vendor_id}
-              onChange={onChange} options={vendorOpts}
+              label="Supplier / Vendor" name="vendor_id" value={mode === 'single' ? form.vendor_id : hdr.vendor_id}
+              onChange={mode === 'single' ? handleChange : onHdrChange} options={vendorOpts}
               placeholder={loadingDeps ? 'Loading…' : 'Select supplier…'}
-              required error={errs.vendor_id} disabled={loadingDeps}
+              required error={mode === 'single' ? errors.vendor_id : hdrErrs.vendor_id} disabled={loadingDeps}
             />
             <FormSelect
-              label="Service Type" name="service_type" value={values.service_type}
-              onChange={onChange} options={SERVICE_TYPE_OPTIONS}
-              placeholder="Select service type…" required error={errs.service_type}
+              label="Service Type" name="service_type" value={mode === 'single' ? form.service_type : hdr.service_type}
+              onChange={mode === 'single' ? handleChange : onHdrChange} options={SERVICE_TYPE_OPTIONS}
+              placeholder="Select service type…" required error={mode === 'single' ? errors.service_type : hdrErrs.service_type}
             />
           </div>
         </div>
-
         {selectedVendor && (
           <div className="rounded-lg bg-slate-50 border border-slate-200 px-4 py-2.5 flex items-center gap-3">
             <span className="text-sm font-medium text-slate-700">{selectedVendor.name}</span>
@@ -342,33 +338,36 @@ export default function NewBooking() {
             </span>
           </div>
         )}
-
         <div className="pt-2 border-t border-slate-100">
           <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-4">
             Travel Details
           </p>
         </div>
-
         <div className="mb-4">
           <FormInput
-            label="Destination" name="destination" value={values.destination}
-            onChange={onChange} placeholder="e.g. Dubai, UAE"
-            required error={errs.destination}
+            label="Destination" name="destination"
+            value={mode === 'single' ? form.destination : hdr.destination}
+            onChange={mode === 'single' ? handleChange : onHdrChange}
+            placeholder="e.g. Dubai, UAE"
+            required error={mode === 'single' ? errors.destination : hdrErrs.destination}
           />
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <FormInput
-            label="Travel Date" name="travel_date" type="date" value={values.travel_date}
-            onChange={onChange} required error={errs.travel_date}
+            label="Travel Date" name="travel_date" type="date"
+            value={mode === 'single' ? form.travel_date : hdr.travel_date}
+            onChange={mode === 'single' ? handleChange : onHdrChange}
+            required error={mode === 'single' ? errors.travel_date : hdrErrs.travel_date}
           />
           <FormInput
-            label="Return Date" name="return_date" type="date" value={values.return_date}
-            onChange={onChange} required error={errs.return_date}
+            label="Return Date" name="return_date" type="date"
+            value={mode === 'single' ? form.return_date : hdr.return_date}
+            onChange={mode === 'single' ? handleChange : onHdrChange}
+            required error={mode === 'single' ? errors.return_date : hdrErrs.return_date}
           />
         </div>
       </div>
-    )
-  }
+  )
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
@@ -406,7 +405,7 @@ export default function NewBooking() {
         ═══════════════════════════════════════════════════════════════ */}
         {mode === 'single' && (
           <form key={`s-${formKey}`} onSubmit={handleSingleSubmit} noValidate autoComplete="off" className="p-6 space-y-5">
-            <HeaderFields values={form} errs={errors} onChange={handleChange} />
+            {headerFields}
 
             {/* Passenger name (single mode only) */}
             <FormInput
@@ -489,7 +488,7 @@ export default function NewBooking() {
         ═══════════════════════════════════════════════════════════════ */}
         {mode === 'multi' && (
           <form key={`m-${formKey}`} onSubmit={handleMultiSubmit} noValidate autoComplete="off" className="p-6 space-y-5">
-            <HeaderFields values={hdr} errs={hdrErrs} onChange={handleHdrChange} />
+            {headerFields}
 
             {/* PAX table */}
             <div className="pt-2 border-t border-slate-100">
