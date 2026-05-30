@@ -138,7 +138,7 @@ def sparklines():
         Invoice.issue_date <= month_end,
         Invoice.status != "cancelled",
     ).group_by(_month_label(Invoice.issue_date)).all()
-    rev_map = {to_str(r.m): float(r.t or 0) for r in rev}
+    rev_map = {to_str(m): float(t or 0) for m, t in rev}
 
     exp = db.session.query(
         _month_label(Expense.expense_date).label("m"),
@@ -147,7 +147,7 @@ def sparklines():
         Expense.expense_date >= month_start,
         Expense.expense_date <= month_end,
     ).group_by(_month_label(Expense.expense_date)).all()
-    exp_map = {to_str(r.m): float(r.t or 0) for r in exp}
+    exp_map = {to_str(m): float(t or 0) for m, t in exp}
 
     revenue  = [rev_map.get(m, 0) for m in months]
     expenses = [exp_map.get(m, 0) for m in months]
