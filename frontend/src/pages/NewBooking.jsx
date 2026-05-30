@@ -313,19 +313,19 @@ export default function NewBooking() {
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <FormSelect
               label="Company" name="customer_id" value={mode === 'single' ? form.customer_id : hdr.customer_id}
-              onChange={mode === 'single' ? handleChange : onHdrChange} options={customers}
+              onChange={mode === 'single' ? handleChange : handleHdrChange} options={customers}
               placeholder={loadingDeps ? 'Loading…' : 'Select company…'}
               required error={mode === 'single' ? errors.customer_id : hdrErrs.customer_id} disabled={loadingDeps}
             />
             <FormSelect
               label="Supplier / Vendor" name="vendor_id" value={mode === 'single' ? form.vendor_id : hdr.vendor_id}
-              onChange={mode === 'single' ? handleChange : onHdrChange} options={vendorOpts}
+              onChange={mode === 'single' ? handleChange : handleHdrChange} options={vendorOpts}
               placeholder={loadingDeps ? 'Loading…' : 'Select supplier…'}
               required error={mode === 'single' ? errors.vendor_id : hdrErrs.vendor_id} disabled={loadingDeps}
             />
             <FormSelect
               label="Service Type" name="service_type" value={mode === 'single' ? form.service_type : hdr.service_type}
-              onChange={mode === 'single' ? handleChange : onHdrChange} options={SERVICE_TYPE_OPTIONS}
+              onChange={mode === 'single' ? handleChange : handleHdrChange} options={SERVICE_TYPE_OPTIONS}
               placeholder="Select service type…" required error={mode === 'single' ? errors.service_type : hdrErrs.service_type}
             />
           </div>
@@ -347,7 +347,7 @@ export default function NewBooking() {
           <FormInput
             label="Destination" name="destination"
             value={mode === 'single' ? form.destination : hdr.destination}
-            onChange={mode === 'single' ? handleChange : onHdrChange}
+            onChange={mode === 'single' ? handleChange : handleHdrChange}
             placeholder="e.g. Dubai, UAE"
             required error={mode === 'single' ? errors.destination : hdrErrs.destination}
           />
@@ -356,13 +356,13 @@ export default function NewBooking() {
           <FormInput
             label="Travel Date" name="travel_date" type="date"
             value={mode === 'single' ? form.travel_date : hdr.travel_date}
-            onChange={mode === 'single' ? handleChange : onHdrChange}
+            onChange={mode === 'single' ? handleChange : handleHdrChange}
             required error={mode === 'single' ? errors.travel_date : hdrErrs.travel_date}
           />
           <FormInput
             label="Return Date" name="return_date" type="date"
             value={mode === 'single' ? form.return_date : hdr.return_date}
-            onChange={mode === 'single' ? handleChange : onHdrChange}
+            onChange={mode === 'single' ? handleChange : handleHdrChange}
             required error={mode === 'single' ? errors.return_date : hdrErrs.return_date}
           />
         </div>
