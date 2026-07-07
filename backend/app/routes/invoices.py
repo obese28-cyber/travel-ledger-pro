@@ -197,10 +197,16 @@ def issue_invoice(invoice_id: int):
         if existing_bill:
             continue
 
+        linked_booking_id = invoice.booking_id
+        if item.booking_item_id:
+            linked_item = BookingItem.query.get(item.booking_item_id)
+            if linked_item:
+                linked_booking_id = linked_item.booking_id
+
         bill = VendorBill(
             bill_reference  = generate_vendor_bill_reference(),
             vendor_id       = item.supplier_id,
-            booking_id      = invoice.booking_id,
+            booking_id      = linked_booking_id,
             booking_item_id = item.booking_item_id,
             description     = f"Supplier cost: {item.description}",
             amount          = round(item.supplier_cost * item.quantity, 2),
@@ -296,7 +302,39 @@ def download_invoice_pdf(invoice_id: int):
         data["payments"] = [p.to_dict() for p in invoice.payments]
 
         # Enrich items with booking-level data (routing, dates, traveler name)
-        if invoice.booking:
+        if invoice.group:
+            group_bookings = [item.booking for item in invoice.group.items if item.booking]
+            data["group_bookings"] = [bk.to_dict(include_items=False) for bk in group_bookings]
+            first_booking = group_bookings[0] if group_bookings else invoice.booking
+            if first_booking:
+                data["traveler_name"] = first_booking.customer.name if first_booking.customer else None
+                data["destination"] = first_booking.destination
+                data["travel_date"] = first_booking.travel_date.isoformat() if first_booking.travel_date else None
+                data["return_date"] = first_booking.return_date.isoformat() if first_booking.return_date else None
+
+            bk_items = {
+                bi.id: (bk, bi)
+                for bk in group_bookings
+                for bi in bk.items
+            }
+            for inv_item in data.get("items", []):
+                bi_id = inv_item.get("booking_item_id")
+                pair = bk_items.get(bi_id)
+                if pair:
+                    bk, bi = pair
+                    inv_item["routing"]        = bk.destination
+                    inv_item["departure_date"] = bk.travel_date.isoformat() if bk.travel_date else None
+                    inv_item["return_date"]    = bk.return_date.isoformat() if bk.return_date else None
+                    inv_item["passenger_name"] = (
+                        bi.passenger_name
+                        or bk.traveler_name
+                        or (bk.customer.name if bk.customer else None)
+                    )
+                    inv_item["airline_name"]   = bi.airline.name if bi.airline else None
+                    inv_item["selling_price"]  = bi.selling_price
+                    inv_item["service_type"]   = bi.service_type
+                    inv_item["ticket_number"]  = bi.ticket_number
+        elif invoice.booking:
             bk = invoice.booking
             data["traveler_name"]  = bk.traveler_name or bk.customer.name if bk.customer else None
             data["destination"]    = bk.destination

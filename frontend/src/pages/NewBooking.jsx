@@ -271,7 +271,7 @@ export default function NewBooking() {
     }
     setSaving(true)
     try {
-      const booking = await bookingService.create({
+      const result = await bookingService.createGroup({
         customer_id: Number(hdr.customer_id),
         destination: hdr.destination.trim(),
         travel_date: hdr.travel_date,
@@ -280,7 +280,7 @@ export default function NewBooking() {
         items: paxList.map((p) => ({
           service_type:   hdr.service_type,
           vendor_id:      Number(hdr.vendor_id),
-          description:    `${SERVICE_TYPE_LABELS[hdr.service_type] || hdr.service_type} — ${hdr.destination.trim()}`,
+          description:    `${SERVICE_TYPE_LABELS[hdr.service_type] || hdr.service_type} - ${hdr.destination.trim()}`,
           selling_price:  parseFloat(p.selling_price),
           vendor_cost:    parseFloat(p.vendor_cost),
           quantity:       1,
@@ -289,18 +289,19 @@ export default function NewBooking() {
           passenger_name: p.name.trim(),
         })),
       })
-      const ref = booking.booking_reference || `#${booking.id}`
-      toast.success(`Booking ${ref} created — ${paxList.length} passengers.`)
+      const invoice = result.invoice
+      const total = invoice?.total_amount ?? mTotalSell
+      toast.success(`Group invoice ${invoice?.invoice_number || ''} created - ${paxList.length} passengers, total ${total.toLocaleString()}.`)
       setHdr({ ...EMPTY_HDR }); setHdrErrs({})
       setPaxList([{ ...EMPTY_PAX }, { ...EMPTY_PAX }]); setPaxErrs([{}, {}])
       setSelectedVendor(null); setFormKey((k) => k + 1)
-      navigate(`/bookings/${booking.id}`)
+      navigate(invoice?.id ? `/invoices/${invoice.id}` : `/bookings/${result.bookings?.[0]?.id}`)
     } catch (err) {
-      toast.error(err?.response?.data?.error ?? 'Failed to create booking.')
+      toast.error(err?.response?.data?.error ?? 'Failed to create group booking.')
     } finally { setSaving(false) }
   }
 
-  // ── Shared header section — rendered as JSX, not a sub-component ──────────
+  // â”€â”€ Shared header section â€” rendered as JSX, not a sub-component â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const headerFields = (
       <div className="space-y-4">
         <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">

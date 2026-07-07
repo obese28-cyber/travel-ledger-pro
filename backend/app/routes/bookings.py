@@ -22,9 +22,10 @@ from ..extensions import db
 from ..models.booking import Booking, BookingItem
 from ..models.customer import Customer
 from ..models.vendor import Vendor
+from ..models.invoice import Invoice, InvoiceItem, InvoiceGroup, InvoiceGroupItem
 from ..utils.responses import success, created, paginated, error, not_found
 from ..services import audit_service
-from ..services.reference_service import generate_booking_ref
+from ..services.reference_service import generate_booking_ref, generate_invoice_number
 
 bookings_bp = Blueprint("bookings", __name__)
 
@@ -63,6 +64,29 @@ def _validate_items(items_data) -> list:
         if item.get("service_type") == "flight":
             if not (item.get("ticket_number") or "").strip():
                 errs.append(f"Item {n}: ticket number is required for flight bookings.")
+    return errs
+
+
+def _validate_ticket_uniqueness(items_data) -> list:
+    errs = []
+    seen = set()
+    for i, item_data in enumerate(items_data):
+        ticket = (item_data.get("ticket_number") or "").strip()
+        if not ticket:
+            continue
+        key = ticket.lower()
+        if key in seen:
+            errs.append(f"Item {i+1}: Ticket number \"{ticket}\" is repeated in this group.")
+            continue
+        seen.add(key)
+        existing = BookingItem.query.filter(
+            db.func.lower(BookingItem.ticket_number) == key
+        ).first()
+        if existing:
+            errs.append(
+                f"Ticket number \"{ticket}\" is already used in booking "
+                f"{existing.booking.booking_reference}. Each ticket number must be unique."
+            )
     return errs
 
 
@@ -169,16 +193,9 @@ def create_booking():
             if not vendor.is_active:
                 return error(f"Item {i+1}: Vendor \"{vendor.name}\" is inactive.")
 
-        tkn = (item_data.get("ticket_number") or "").strip()
-        if tkn:
-            existing = BookingItem.query.filter(
-                db.func.lower(BookingItem.ticket_number) == tkn.lower()
-            ).first()
-            if existing:
-                return error(
-                    f"Ticket number \"{tkn}\" is already used in booking "
-                    f"{existing.booking.booking_reference}. Each ticket number must be unique."
-                )
+    ticket_errors = _validate_ticket_uniqueness(items_data)
+    if ticket_errors:
+        return error(" | ".join(ticket_errors))
 
     # ── Create booking header ──────────────────────────────────────────────────
     booking = Booking(
@@ -220,6 +237,166 @@ def create_booking():
     return created(booking.to_dict())
 
 
+@bookings_bp.post("/group")
+@jwt_required()
+def create_group_booking():
+    """
+    Create one booking per passenger and one draft group invoice.
+
+    The invoice total is calculated from the created booking records, then all
+    booking IDs are linked through invoice_groups / invoice_group_items.
+    """
+    user_id = int(get_jwt_identity())
+    data = request.get_json()
+    if not data:
+        return error("Request body must be JSON.")
+
+    customer_id = data.get("customer_id")
+    if not customer_id:
+        return error("customer_id is required. Please select a customer for this booking.")
+    customer = Customer.query.get(customer_id)
+    if not customer:
+        return not_found("Customer")
+
+    items_data = data.get("items") or []
+    if not items_data:
+        return error("At least one passenger is required.")
+
+    item_errors = _validate_items(items_data)
+    if item_errors:
+        return error(" | ".join(item_errors))
+
+    ticket_errors = _validate_ticket_uniqueness(items_data)
+    if ticket_errors:
+        return error(" | ".join(ticket_errors))
+
+    for i, item_data in enumerate(items_data):
+        vendor = Vendor.query.get(item_data.get("vendor_id"))
+        if not vendor:
+            return error(f"Item {i+1}: Vendor/supplier ID {item_data.get('vendor_id')} not found.")
+        if not vendor.is_active:
+            return error(f"Item {i+1}: Vendor \"{vendor.name}\" is inactive.")
+
+    bookings = []
+    booking_items = []
+    for item_data in items_data:
+        passenger_name = (
+            item_data.get("passenger_name")
+            or item_data.get("traveler_name")
+            or item_data.get("name")
+            or ""
+        ).strip()
+        booking = Booking(
+            booking_reference = generate_booking_ref(),
+            customer_id       = customer_id,
+            traveler_name     = passenger_name or None,
+            destination       = data.get("destination"),
+            travel_date       = _parse_date(data.get("travel_date")),
+            return_date       = _parse_date(data.get("return_date")),
+            status            = "pending",
+            notes             = data.get("notes"),
+            created_by        = user_id,
+        )
+        db.session.add(booking)
+        db.session.flush()
+
+        booking_item = BookingItem(
+            booking_id      = booking.id,
+            service_type    = item_data["service_type"],
+            vendor_id       = item_data["vendor_id"],
+            description     = item_data.get("description"),
+            selling_price   = float(item_data["selling_price"]),
+            vendor_cost     = float(item_data["vendor_cost"]),
+            airline_id      = item_data.get("airline_id"),
+            ticket_number   = (item_data.get("ticket_number") or "").strip() or None,
+            passenger_name  = passenger_name or None,
+        )
+        db.session.add(booking_item)
+        db.session.flush()
+        bookings.append(booking)
+        booking_items.append(booking_item)
+
+    # Calculate from the linked booking records, not passenger count.
+    booking_totals = [
+        round(float(db.session.query(db.func.coalesce(db.func.sum(BookingItem.selling_price), 0.0))
+                    .filter(BookingItem.booking_id == booking.id)
+                    .scalar() or 0.0), 2)
+        for booking in bookings
+    ]
+    subtotal = round(sum(booking_totals), 2)
+    tax_rate = float(data.get("tax_rate", 0) or 0)
+    tax_amt = round(subtotal * tax_rate / 100, 2)
+    total = round(subtotal + tax_amt, 2)
+
+    invoice_number = generate_invoice_number()
+    invoice = Invoice(
+        invoice_number = invoice_number,
+        booking_id     = bookings[0].id,
+        customer_id    = customer_id,
+        issue_date     = date.today(),
+        due_date       = _parse_date(data.get("due_date")),
+        subtotal       = subtotal,
+        tax_amount     = tax_amt,
+        total_amount   = total,
+        amount_paid    = 0.0,
+        status         = "draft",
+        notes          = data.get("notes"),
+        created_by     = user_id,
+    )
+    db.session.add(invoice)
+    db.session.flush()
+
+    group = InvoiceGroup(
+        group_reference = f"GRP-{invoice_number}",
+        invoice_id      = invoice.id,
+        customer_id     = customer_id,
+        total_amount    = total,
+        created_by      = user_id,
+    )
+    db.session.add(group)
+    db.session.flush()
+
+    for position, (booking, bk_item) in enumerate(zip(bookings, booking_items), start=1):
+        db.session.add(InvoiceGroupItem(
+            invoice_group_id = group.id,
+            booking_id       = booking.id,
+            position         = position,
+        ))
+
+        selling = float(bk_item.selling_price or 0)
+        cost = float(bk_item.vendor_cost or 0)
+        db.session.add(InvoiceItem(
+            invoice_id      = invoice.id,
+            booking_item_id = bk_item.id,
+            supplier_id     = bk_item.vendor_id,
+            description     = bk_item.description or f"{bk_item.service_type.replace('_', ' ').title()} service",
+            quantity        = 1,
+            supplier_cost   = cost,
+            unit_price      = selling,
+            total_price     = selling,
+            markup_amount   = round(selling - cost, 2),
+            show_markup     = False,
+        ))
+
+    audit_service.log("CREATE", "invoice_groups", group.id, user_id,
+                      new_values={"invoice_number": invoice.invoice_number,
+                                  "booking_ids": [b.id for b in bookings],
+                                  "total_amount": total})
+    db.session.commit()
+
+    db.session.refresh(invoice)
+    return created({
+        "bookings": [b.to_dict() for b in bookings],
+        "invoice": invoice.to_dict(),
+        "group": {
+            "id": group.id,
+            "group_reference": group.group_reference,
+            "total_amount": group.total_amount,
+            "booking_ids": [b.id for b in bookings],
+        },
+    })
+
+
 @bookings_bp.get("/<int:booking_id>")
 @jwt_required()
 def get_booking(booking_id: int):
@@ -231,6 +408,14 @@ def get_booking(booking_id: int):
     data = booking.to_dict()
     # Also include linked invoices
     data["invoices"] = [inv.to_dict(include_items=False) for inv in booking.invoices]
+    group_links = InvoiceGroupItem.query.filter_by(booking_id=booking_id).all()
+    group_invoices = [
+        link.group.invoice.to_dict(include_items=False)
+        for link in group_links
+        if link.group and link.group.invoice
+    ]
+    if group_invoices:
+        data["group_invoices"] = group_invoices
     return success(data)
 
 

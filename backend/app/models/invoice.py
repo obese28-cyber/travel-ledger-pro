@@ -43,6 +43,8 @@ class Invoice(db.Model):
     items    = db.relationship("InvoiceItem", back_populates="invoice",
                                cascade="all, delete-orphan", lazy="select")
     payments = db.relationship("Payment",     back_populates="invoice", lazy="dynamic")
+    group    = db.relationship("InvoiceGroup", back_populates="invoice",
+                               uselist=False, cascade="all, delete-orphan")
 
     @property
     def balance_due(self) -> float:
@@ -72,6 +74,11 @@ class Invoice(db.Model):
             "invoice_number":      self.invoice_number,
             "booking_id":          self.booking_id,
             "booking_ref":         self.booking.booking_reference if self.booking else None,
+            "is_group_invoice":    self.group is not None,
+            "group_id":            self.group.id if self.group else None,
+            "group_reference":     self.group.group_reference if self.group else None,
+            "passenger_count":     len(self.group.items) if self.group else 1,
+            "group_bookings":      self.group.booking_summaries() if self.group else [],
             "customer_id":         self.customer_id,
             "customer_name":       self.customer.name  if self.customer else None,
             "customer_email":      self.customer.email if self.customer else None,
@@ -136,6 +143,7 @@ class InvoiceItem(db.Model):
         bi = self.booking_item
         airline_name   = bi.airline.name   if bi and bi.airline   else None
         ticket_number  = bi.ticket_number  if bi                  else None
+        booking        = bi.booking         if bi                  else None
 
         return {
             "id":              self.id,
@@ -152,5 +160,61 @@ class InvoiceItem(db.Model):
             "show_markup":     self.show_markup,
             "airline_name":    airline_name,
             "ticket_number":   ticket_number,
+            "passenger_name":   bi.passenger_name if bi else None,
+            "service_type":     bi.service_type if bi else None,
+            "selling_price":    bi.selling_price if bi else self.unit_price,
+            "booking_id":       booking.id if booking else None,
+            "booking_ref":      booking.booking_reference if booking else None,
+            "destination":      booking.destination if booking else None,
+            "travel_date":      booking.travel_date.isoformat() if booking and booking.travel_date else None,
+            "return_date":      booking.return_date.isoformat() if booking and booking.return_date else None,
             "created_at":      self.created_at.isoformat() if self.created_at else None,
         }
+
+
+class InvoiceGroup(db.Model):
+    __tablename__ = "invoice_groups"
+
+    id              = db.Column(db.Integer, primary_key=True)
+    group_reference = db.Column(db.String(50), nullable=False, unique=True)
+    invoice_id      = db.Column(db.Integer, db.ForeignKey("invoices.id", ondelete="CASCADE"), nullable=False, unique=True)
+    customer_id     = db.Column(db.Integer, db.ForeignKey("customers.id"), nullable=False)
+    total_amount    = db.Column(db.Float, nullable=False, default=0.0)
+    created_by      = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+    created_at      = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+
+    invoice  = db.relationship("Invoice", back_populates="group")
+    customer = db.relationship("Customer")
+    creator  = db.relationship("User", foreign_keys=[created_by])
+    items    = db.relationship("InvoiceGroupItem", back_populates="group",
+                               cascade="all, delete-orphan", order_by="InvoiceGroupItem.position")
+
+    def booking_summaries(self) -> list:
+        rows = []
+        for item in self.items:
+            booking = item.booking
+            if not booking:
+                continue
+            rows.append({
+                "booking_id":        booking.id,
+                "booking_ref":       booking.booking_reference,
+                "traveler_name":     booking.traveler_name,
+                "destination":       booking.destination,
+                "travel_date":       booking.travel_date.isoformat() if booking.travel_date else None,
+                "return_date":       booking.return_date.isoformat() if booking.return_date else None,
+                "total_amount":      booking.total_selling_price(),
+            })
+        return rows
+
+
+class InvoiceGroupItem(db.Model):
+    __tablename__ = "invoice_group_items"
+
+    id               = db.Column(db.Integer, primary_key=True)
+    invoice_group_id = db.Column(db.Integer, db.ForeignKey("invoice_groups.id", ondelete="CASCADE"), nullable=False)
+    booking_id       = db.Column(db.Integer, db.ForeignKey("bookings.id", ondelete="CASCADE"), nullable=False)
+    position         = db.Column(db.Integer, nullable=False, default=0)
+    created_at       = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+
+    group   = db.relationship("InvoiceGroup", back_populates="items")
+    booking = db.relationship("Booking")

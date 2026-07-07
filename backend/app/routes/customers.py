@@ -597,14 +597,24 @@ def get_customer_statement(customer_id: int):
         # Build service description from booking items
         service_types     = []
         description_parts = []
-        if inv.booking and inv.booking.items:
-            for item in inv.booking.items:
+        booking_refs      = []
+        linked_bookings   = [item.booking for item in inv.group.items if item.booking] if inv.group else []
+        if not linked_bookings and inv.booking:
+            linked_bookings = [inv.booking]
+
+        for booking in linked_bookings:
+            booking_refs.append(booking.booking_reference)
+            for item in booking.items:
                 if item.service_type not in service_types:
                     service_types.append(item.service_type)
                     description_parts.append(item.service_type.replace("_", " ").title())
 
         svc_label = " + ".join(description_parts) if description_parts else "Services"
-        dest      = (inv.booking.destination or "") if inv.booking else ""
+        destinations = []
+        for booking in linked_bookings:
+            if booking.destination and booking.destination not in destinations:
+                destinations.append(booking.destination)
+        dest      = ", ".join(destinations)
         desc      = f"{svc_label} — {dest}" if dest else svc_label
 
         # Invoice status badge logic (independent of account balance)
@@ -623,9 +633,12 @@ def get_customer_statement(customer_id: int):
             "date":             sort_date,
             "sort_key":         f"{sort_date}_A_inv_{inv.id:06d}",   # A = invoices before same-day pmts
             "reference":        inv.invoice_number,
-            "booking_ref":      inv.booking.booking_reference if inv.booking else None,
+            "booking_ref":      ", ".join(booking_refs) if booking_refs else None,
             "booking_id":       inv.booking_id,
             "invoice_id":       inv.id,
+            "is_group_invoice": inv.group is not None,
+            "group_reference":  inv.group.group_reference if inv.group else None,
+            "passenger_count":  len(linked_bookings) if inv.group else 1,
             "service_types":    service_types,
             "description":      desc,
             "debit":            round(inv.total_amount, 2),
@@ -683,7 +696,15 @@ def get_customer_statement(customer_id: int):
         # Link to booking (via invoice)
         booking_ref = None
         booking_id  = None
-        if pmt.invoice and pmt.invoice.booking:
+        if pmt.invoice and pmt.invoice.group:
+            refs = [
+                item.booking.booking_reference
+                for item in pmt.invoice.group.items
+                if item.booking
+            ]
+            booking_ref = ", ".join(refs) if refs else None
+            booking_id = pmt.invoice.booking_id
+        elif pmt.invoice and pmt.invoice.booking:
             booking_ref = pmt.invoice.booking.booking_reference
             booking_id  = pmt.invoice.booking_id
 

@@ -129,13 +129,31 @@ export default function InvoiceDetail() {
                 {invoice.customer_email && <p className="text-sm text-slate-500">{invoice.customer_email}</p>}
                 {invoice.customer_phone && <p className="text-sm text-slate-500">{invoice.customer_phone}</p>}
               </div>
-              {invoice.booking_ref && (
+              {(invoice.booking_ref || invoice.is_group_invoice) && (
                 <div>
-                  <p className="text-xs text-slate-400 mb-1">Booking Reference</p>
-                  <Link to={`/bookings/${invoice.booking_id}`}
-                    className="font-mono text-sm font-semibold text-indigo-600 hover:underline">
-                    {invoice.booking_ref}
-                  </Link>
+                  <p className="text-xs text-slate-400 mb-1">
+                    {invoice.is_group_invoice ? 'Group Bookings' : 'Booking Reference'}
+                  </p>
+                  {invoice.is_group_invoice ? (
+                    <div className="space-y-1">
+                      <p className="text-sm font-semibold text-slate-700">
+                        {invoice.passenger_count} passengers · {invoice.group_reference}
+                      </p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {(invoice.group_bookings ?? []).map((booking) => (
+                          <Link key={booking.booking_id} to={`/bookings/${booking.booking_id}`}
+                            className="font-mono text-xs font-semibold text-indigo-600 hover:underline">
+                            {booking.booking_ref}
+                          </Link>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <Link to={`/bookings/${invoice.booking_id}`}
+                      className="font-mono text-sm font-semibold text-indigo-600 hover:underline">
+                      {invoice.booking_ref}
+                    </Link>
+                  )}
                 </div>
               )}
             </div>
@@ -169,6 +187,11 @@ export default function InvoiceDetail() {
                           <tr key={i} className="text-slate-700">
                             <td className="py-2.5 pr-3 max-w-[220px]">
                               <span>{item.description}</span>
+                              {item.passenger_name && (
+                                <div className="mt-0.5 text-xs font-medium text-slate-500">
+                                  Passenger: {item.passenger_name}
+                                </div>
+                              )}
                               {item.airline_name && (
                                 <div className="mt-0.5">
                                   <span className="text-xs text-indigo-600 font-medium">✈ {item.airline_name}</span>
@@ -297,7 +320,7 @@ export default function InvoiceDetail() {
               </p>
             )}
 
-            {invoice.booking_id && (
+            {invoice.booking_id && !invoice.is_group_invoice && (
               <Link to={`/bookings/${invoice.booking_id}`}
                 className="w-full flex items-center justify-center px-4 py-2.5 rounded-lg
                            text-sm font-medium border border-slate-200 text-slate-600
