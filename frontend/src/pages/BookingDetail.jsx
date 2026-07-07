@@ -258,6 +258,7 @@ export default function BookingDetail() {
                       {[
                         'Description',
                         'Type',
+                        'Traveler',
                         'Airline / Ticket',
                         'Qty',
                         'Selling Price',
@@ -290,6 +291,10 @@ export default function BookingDetail() {
 
                           <td className="py-2.5 pr-3">
                             <Badge label={item.service_type} />
+                          </td>
+
+                          <td className="py-2.5 pr-3">
+                            {item.passenger_name || booking.traveler_name || '—'}
                           </td>
 
                           <td className="py-2.5 pr-3">
