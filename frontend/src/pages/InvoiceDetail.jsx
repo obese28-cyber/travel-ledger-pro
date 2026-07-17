@@ -19,6 +19,7 @@ import { useToast }         from '../components/ui/Toast'
 import Badge                from '../components/ui/Badge'
 import { PageSpinner, ButtonSpinner } from '../components/ui/LoadingSpinner'
 import InvoiceIssueModal    from './InvoiceIssueModal'
+import RecordPaymentModal   from './RecordPaymentModal'
 
 const fmt = (n) =>
   new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2 }).format(n ?? 0)
@@ -48,7 +49,8 @@ export default function InvoiceDetail() {
 
   const [invoice,        setInvoice]        = useState(null)
   const [loading,        setLoading]        = useState(true)
-  const [showIssueModal, setShowIssueModal] = useState(false)
+  const [showIssueModal,   setShowIssueModal]   = useState(false)
+  const [showPaymentModal, setShowPaymentModal] = useState(false)
 
   const load = () => {
     invoiceService.get(id)
@@ -320,6 +322,15 @@ export default function InvoiceDetail() {
               </p>
             )}
 
+            {isIssued && balanceDue > 0 && (
+              <button onClick={() => setShowPaymentModal(true)}
+                className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg
+                           text-sm font-medium bg-emerald-600 hover:bg-emerald-700 text-white
+                           transition-colors shadow-sm">
+                💰 Record Payment
+              </button>
+            )}
+
             {invoice.booking_id && !invoice.is_group_invoice && (
               <Link to={`/bookings/${invoice.booking_id}`}
                 className="w-full flex items-center justify-center px-4 py-2.5 rounded-lg
@@ -385,6 +396,14 @@ export default function InvoiceDetail() {
           invoice={invoice}
           onClose={() => setShowIssueModal(false)}
           onSuccess={handleIssueSuccess}
+        />
+      )}
+
+      {showPaymentModal && invoice && (
+        <RecordPaymentModal
+          invoice={invoice}
+          onClose={() => setShowPaymentModal(false)}
+          onSuccess={() => { setShowPaymentModal(false); load() }}
         />
       )}
 

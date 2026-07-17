@@ -9,7 +9,7 @@
  */
 
 import React, { createContext, useContext, useState, useEffect } from 'react'
-import { authService } from '../services/authService'
+import authService from '../services/authService'
 
 // Create the context
 const AuthContext = createContext(null)
