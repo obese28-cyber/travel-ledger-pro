@@ -6,7 +6,7 @@ This is the workspace for Travel Ledger Pro, a cloud-based accounting and manage
 
 ```
 Travel Ledger Pro/
-├── CLAUDE.md                          ← you are here
+├── AGENTS.md                          ← you are here
 ├── 01 Daily Logs/
 │   └── [C] 2026-07-05.md
 └── 02 Projects/

@@ -9,7 +9,7 @@ from .user        import User
 from .customer    import Customer
 from .vendor      import Vendor
 from .booking     import Booking, BookingItem
-from .invoice     import Invoice, InvoiceItem
+from .invoice     import Invoice, InvoiceItem, InvoiceGroup, InvoiceGroupItem
 from .payment     import Payment
 from .vendor_bill import VendorBill, VendorPayment, VendorPaymentBatch
 from .expense     import Expense
@@ -20,7 +20,7 @@ from .airline     import Airline
 __all__ = [
     "User", "Customer", "Vendor",
     "Booking", "BookingItem",
-    "Invoice", "InvoiceItem",
+    "Invoice", "InvoiceItem", "InvoiceGroup", "InvoiceGroupItem",
     "Payment",
     "VendorBill", "VendorPayment", "VendorPaymentBatch",
     "Expense",

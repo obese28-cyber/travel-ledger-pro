@@ -1,0 +1,13 @@
+powershellcd C:\Users\HomePC\travel-ledger-pro-v2\frontend
+npm run build
+powershellcd C:\Users\HomePC\travel-ledger-pro-v2
+git add -A
+git commit -m "Add Cash Book report tab with logo in print"
+git push
+
+
+
+
+
+Then SSH into the server to pull and restart:
+powershellssh root@5.78.216.203
