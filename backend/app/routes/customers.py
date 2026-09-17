@@ -781,7 +781,7 @@ def get_customer_statement(customer_id: int):
     invoice_count = len([e for e in entries if e["entry_type"] == "invoice"])
     payment_count = len([e for e in entries if e["entry_type"] != "invoice"])
 
-    return success({
+    statement = {
         "customer": customer.to_dict(include_stats=True),
         "summary": {
             # Core AR figures (new correct model)
@@ -806,4 +806,15 @@ def get_customer_statement(customer_id: int):
             "is_settled":       ar["net_outstanding"]  == 0.0 and ar["open_credit"] == 0.0,
         },
         "entries": entries,
-    })
+    }
+    if request.args.get("format") == "xlsx":
+        from flask import send_file
+        from ..services.customer_export import build_customer_statement
+        return send_file(
+            build_customer_statement(statement),
+            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            as_attachment=True,
+            download_name=f"customer-{customer_id}-statement.xlsx",
+            max_age=0,
+        )
+    return success(statement)

@@ -218,6 +218,28 @@ export default function CustomerDetail() {
   const [applyingCredit,  setApplyingCredit] = useState(null)  // payment row to apply to an invoice
   const [showBulkPay,     setShowBulkPay]    = useState(false)
   const [showAdvance,     setShowAdvance]    = useState(false)
+  const [exporting, setExporting] = useState(false)
+
+  async function exportExcel() {
+    setExporting(true)
+    try {
+      const response = await client.get(`/customers/${id}/statement`, {
+        params: { format: 'xlsx' }, responseType: 'blob',
+      })
+      const url = URL.createObjectURL(response.data)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `customer-${id}-statement.xlsx`
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      setTimeout(() => URL.revokeObjectURL(url), 1000)
+    } catch {
+      toast.error('Could not export customer account. Please try again.')
+    } finally {
+      setExporting(false)
+    }
+  }
 
   function load() {
     setLoading(true)
@@ -453,6 +475,12 @@ export default function CustomerDetail() {
                         d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
                 </svg>
                 Pay Here
+              </button>
+
+              <button onClick={exportExcel} disabled={exporting}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs
+                           font-medium border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-wait">
+                {exporting ? 'Exporting…' : 'Export to Excel'}
               </button>
 
               <button onClick={() => window.print()}
